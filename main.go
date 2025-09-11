@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/tk103331/eino-cli/agent"
 	"github.com/tk103331/eino-cli/config"
+	"github.com/tk103331/eino-cli/mcp"
 )
 
 var (
@@ -19,10 +21,16 @@ var rootCmd = &cobra.Command{
 	Long:  `A command line interface for Eino`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// 加载配置文件
-		_, err := config.LoadConfig(configPath)
+		cfg, err := config.LoadConfig(configPath)
 		if err != nil {
 			return fmt.Errorf("加载配置文件失败: %w", err)
 		}
+
+		// 初始化MCP管理器
+		if err := mcp.InitializeGlobalManager(context.Background(), cfg); err != nil {
+			return fmt.Errorf("初始化MCP管理器失败: %w", err)
+		}
+
 		return nil
 	},
 }

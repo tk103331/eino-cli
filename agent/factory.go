@@ -24,6 +24,6 @@ func (f *Factory) CreateAgent(name string) (Agent, error) {
 	}
 	
 	// 创建ReactAgent
-	agent := NewReactAgent(&agentCfg)
+	agent := NewReactAgent(name, &agentCfg)
 	return agent, nil
 }
