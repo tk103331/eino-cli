@@ -1,0 +1,95 @@
+# 模型提供商配置
+providers:
+  openai:
+    type: openai
+    base_url: https://api.openai.com/v1
+    api_key: sk-xxxxx
+
+# 模型配置
+models:
+  gpt4:
+    provider: openai
+    model: gpt-4
+    max_tokens: 4096
+    temperature: 0.7
+
+# MCP 服务器配置
+mcp_servers:
+  # SSE 类型的 MCP 服务器
+  sse_server:
+    type: mcp
+    config:
+      url: "http://localhost:3000/mcp"  # MCP 服务器 URL
+      headers:
+        "Content-Type": "application/json"
+        "Authorization": "Bearer your-token"  # 可选的认证头
+  
+  # STDIO 类型的 MCP 服务器
+  stdio_server:
+    type: stdio
+    config:
+      cmd: "python"                    # 要执行的命令
+      args:
+        - "-m"
+        - "your_mcp_server"             # MCP 服务器模块
+      env:
+        "PYTHONPATH": "/path/to/server" # 环境变量
+        "API_KEY": "your-api-key"
+
+# Agent 配置
+agents:
+  search_agent:
+    system: "你是一个搜索助手，可以帮助用户搜索信息"
+    model: gpt4
+    tools:
+      - duckduckgo_search
+      - wikipedia_search
+    mcp_servers:                        # Agent 可以使用的 MCP 服务器
+      - sse_server
+  
+  # 多功能助手示例（包含自定义工具和MCP服务器）
+  multi_agent:
+    system: "你是一个多功能助手，可以搜索信息、查询天气、获取系统信息等"
+    model: gpt4
+    tools:
+      - duckduckgo_search
+      - weather_api
+      - system_info
+    mcp_servers:
+      - sse_server
+      - stdio_server
+
+# 工具配置
+tools:
+  duckduckgo_search:
+    type: duckduckgo
+    config:
+      max_results: 10        # 最大搜索结果数量，默认10
+      region: "wt"           # 搜索区域：wt(全球)、cn(中国)、us(美国)、uk(英国)
+      safe_search: "off"     # 安全搜索：off(关闭)、moderate(中等)、strict(严格)
+      timeout: 10            # 超时时间（秒），默认10秒
+  
+  # 自定义 HTTP 工具示例
+  weather_api:
+    type: customhttp
+    description: "获取天气信息的 API 工具"
+    config:
+      url: "https://api.openweathermap.org/data/2.5/weather?q={{city}}"
+      method: "GET"
+      headers:
+        "Content-Type": "application/json"
+    params:
+      - name: "city"
+        type: "string"
+        description: "城市名称"
+        required: true
+  
+  # 自定义命令行工具示例
+  system_info:
+    type: customexec
+    description: "获取系统信息"
+    config:
+      cmd: "uname -a && df -h"
+      dir: "/tmp"
+      timeout: 30
+    params: []
