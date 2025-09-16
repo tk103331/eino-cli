@@ -27,4 +27,6 @@ go.work
 # OS specific files
 .DS_Store
 Thumbs.db
+
+eino-cli
 config.yml

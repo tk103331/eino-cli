@@ -86,6 +86,30 @@ func (r *ReactAgent) Run(prompt string) error {
 	return nil
 }
 
+// Chat 进行对话，返回响应内容
+func (r *ReactAgent) Chat(ctx context.Context, prompt string) (string, error) {
+	if r.agent == nil {
+		if err := r.Init(); err != nil {
+			return "", err
+		}
+	}
+
+	// 创建用户消息
+	messages := []*schema.Message{
+		schema.SystemMessage(r.config.System),
+		schema.UserMessage(prompt),
+	}
+
+	// 使用Agent生成响应
+	response, err := r.agent.Generate(ctx, messages)
+	if err != nil {
+		return "", fmt.Errorf("Chat失败: %w", err)
+	}
+
+	// 返回响应内容
+	return response.Content, nil
+}
+
 // createModel 创建模型
 func (r *ReactAgent) createModel() (model.ToolCallingChatModel, error) {
 	// 从Factory获取全局配置
