@@ -93,3 +93,9 @@ tools:
       dir: "/tmp"
       timeout: 30
     params: []
+
+settings:
+  langfuse:
+    host: https://cloud.langfuse.com
+    public_key: pk-xxx
+    secret_key: sk-xxx

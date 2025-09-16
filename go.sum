@@ -63,6 +63,8 @@ github.com/bytedance/sonic v1.14.0/go.mod h1:WoEbx8WTcFJfzCe0hbmyTGrfjt8PzNEBdxl
 github.com/bytedance/sonic/loader v0.1.1/go.mod h1:ncP89zfokxS5LZrJxl5z0UJcsk4M4yY2JpfqGeCtNLU=
 github.com/bytedance/sonic/loader v0.3.0 h1:dskwH8edlzNMctoruo8FPTJDF3vLtDT0sXZwvZJyqeA=
 github.com/bytedance/sonic/loader v0.3.0/go.mod h1:N8A3vUdtUebEY2/VQC0MyhYeKUFosQU6FxH2JmUe6VI=
+github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=
+github.com/cenkalti/backoff/v4 v4.3.0/go.mod h1:Y3VNntkOUPxTVeUxJ/G5vcM//AlwfmyYozVcomhLiZE=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/certifi/gocertifi v0.0.0-20190105021004-abcd57078448/go.mod h1:GJKEexRPVJrBSOjoqN5VNOIKJ5Q3RViH6eu3puDRwx4=
 github.com/chromedp/cdproto v0.0.0-20250319231242-a755498943c8 h1:AqW2bDQf67Zbq6Tpop/+yJSIknxhiQecO2B8jNYTAPs=
@@ -76,6 +78,8 @@ github.com/cloudwego/base64x v0.1.5 h1:XPciSp1xaq2VCSt6lF0phncD4koWyULpl5bUxbfCy
 github.com/cloudwego/base64x v0.1.5/go.mod h1:0zlkT4Wn5C6NdauXdJRhSKRlJvmclQ1hhJgA0rcu/8w=
 github.com/cloudwego/eino v0.5.0 h1:hlNCfBeHGtD+UnLV3xF8pfjA7zxTHQywoUCQ7xeI7w8=
 github.com/cloudwego/eino v0.5.0/go.mod h1:S38tlNO4cNqFfGJKQSJZimxjzc9JDJKdf2eW3FEEfdc=
+github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20250916084527-de8ccb471c00 h1:9Y4DerkSFBNTv8TzBQNsxwe3UrJjzaK9gG+Pi1PhMck=
+github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20250916084527-de8ccb471c00/go.mod h1:YLoXgSmgquJeT6VaBrP5fTzM7ihm39xoEB/LQ2i9UHc=
 github.com/cloudwego/eino-ext/components/model/ark v0.1.27 h1:rn6pYdjNeYf5+PHK5hHXqercw8YVI+fHsAACsoneEw0=
 github.com/cloudwego/eino-ext/components/model/ark v0.1.27/go.mod h1:v6cx0axah4pw4h6bOyQ8HElgzuZY0pgMtowZ/8bTGFo=
 github.com/cloudwego/eino-ext/components/model/claude v0.1.3 h1:BK4Oydt8Iawylk0v6SsHN+ef5XPJdaS+9L8htAhpQS8=
@@ -112,6 +116,8 @@ github.com/cloudwego/eino-ext/components/tool/sequentialthinking v0.0.0-20250905
 github.com/cloudwego/eino-ext/components/tool/sequentialthinking v0.0.0-20250905035413-86dbae6351d5/go.mod h1:V1ueYRbOOiGkWdYxhFAXHhvrHO7f1aRwrpPDnzN+rhQ=
 github.com/cloudwego/eino-ext/components/tool/wikipedia v0.0.0-20250905035413-86dbae6351d5 h1:x3KBwe6dnc8HkWldX1k0lOSXlH6V0uuR8GAz4gclMnU=
 github.com/cloudwego/eino-ext/components/tool/wikipedia v0.0.0-20250905035413-86dbae6351d5/go.mod h1:KgrbsuLV8OdaPn8lQKPzkWxMY4ONxOkDsDGmfwl/dXs=
+github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20250409060521-ba8646352e4b h1:QGOp1e7tmQEUtznQ8fD8xUam2d/RECA8oJuPam2212s=
+github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20250409060521-ba8646352e4b/go.mod h1:3U4sve/4FGASns5zXHUfBX4ZTruQEhT1t9F1cNb5czM=
 github.com/cloudwego/eino-ext/libs/acl/openai v0.0.0-20250826113018-8c6f6358d4bb h1:RMslzyijc3bi9EkqCulpS0hZupTl1y/wayR3+fVRN/c=
 github.com/cloudwego/eino-ext/libs/acl/openai v0.0.0-20250826113018-8c6f6358d4bb/go.mod h1:fHn/6OqPPY1iLLx9wzz+MEVT5Dl9gwuZte1oLEnCoYw=
 github.com/cloudwego/iasm v0.2.0/go.mod h1:8rXZaNYT2n95jn+zTI1sDr+IgcD2GVs0nlbbQPiEFhY=

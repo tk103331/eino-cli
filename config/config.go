@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"github.com/cloudwego/eino-ext/callbacks/langfuse"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -18,6 +19,7 @@ type Config struct {
 	DefaultModel string               `yaml:"default_model,omitempty"`
 	MCPServers   map[string]MCPServer `yaml:"mcp_servers,omitempty"`
 	Tools        map[string]Tool      `yaml:"tools,omitempty"`
+	Settings     Settings             `yaml:"settings,omitempty"`
 }
 
 // Agent 表示AI代理配置
@@ -71,6 +73,11 @@ type ToolParam struct {
 	Type        string `yaml:"type"`
 	Description string `yaml:"description,omitempty"`
 	Required    bool   `yaml:"required,omitempty"`
+}
+
+// Settings 全局设置
+type Settings struct {
+	Langfuse *langfuse.Config
 }
 
 // LoadConfig 从配置文件加载配置并保存到全局变量

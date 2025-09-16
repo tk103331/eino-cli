@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/cloudwego/eino-ext/callbacks/langfuse"
+	"github.com/cloudwego/eino/callbacks"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -40,12 +42,21 @@ var runCmd = &cobra.Command{
 	Short: "Run the agent",
 	Long:  `Run the agent with specified parameters`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		cfg := config.GetConfig()
+
+		if cfg.Settings.Langfuse != nil {
+			handler, flusher := langfuse.NewLangfuseHandler(cfg.Settings.Langfuse)
+			defer flusher()
+			callbacks.AppendGlobalHandlers(handler) // 设置langfuse为全局callback
+		}
+
 		// 获取参数
 		agentName, _ := cmd.Flags().GetString("agent")
 		prompt, _ := cmd.Flags().GetString("prompt")
 
 		// 创建Agent工厂
-		factory := agent.NewFactory(config.GetConfig())
+		factory := agent.NewFactory(cfg)
 
 		// 创建Agent
 		agent, err := factory.CreateAgent(agentName)
