@@ -108,7 +108,11 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "backspace":
 			if len(m.input) > 0 {
-				m.input = m.input[:len(m.input)-1]
+				// 使用rune来正确处理UTF-8字符的删除
+				runes := []rune(m.input)
+				if len(runes) > 0 {
+					m.input = string(runes[:len(runes)-1])
+				}
 			}
 			return m, nil
 
@@ -129,9 +133,24 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		default:
-			// 添加字符到输入
-			if len(msg.String()) == 1 {
-				m.input += msg.String()
+			// 调试：记录所有键盘输入事件
+			keyStr := msg.String()
+
+			// 简化过滤逻辑 - 只过滤明确的控制键
+			if keyStr == "ctrl+c" || keyStr == "q" {
+				return m, tea.Quit
+			}
+
+			// 过滤其他控制键但允许所有可见字符
+			if strings.HasPrefix(keyStr, "ctrl+") ||
+				strings.HasPrefix(keyStr, "alt+") ||
+				keyStr == "tab" || keyStr == "esc" {
+				return m, nil
+			}
+
+			// 直接添加所有其他字符，包括中文
+			if keyStr != "" {
+				m.input += keyStr
 			}
 			return m, nil
 		}
