@@ -2,12 +2,13 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/cloudwego/eino-ext/callbacks/langfuse"
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/spf13/cobra"
 	"github.com/tk103331/eino-cli/config"
-	"github.com/tk103331/eino-cli/ui"
+	"github.com/tk103331/eino-cli/ui/chat"
 )
 
 var chatCmd = &cobra.Command{
@@ -26,9 +27,20 @@ var chatCmd = &cobra.Command{
 
 		// 获取参数
 		modelName, _ := cmd.Flags().GetString("model")
+		toolsStr, _ := cmd.Flags().GetString("tools")
+
+		// 解析工具列表
+		var tools []string
+		if toolsStr != "" {
+			tools = strings.Split(toolsStr, ",")
+			// 去除空格
+			for i, tool := range tools {
+				tools[i] = strings.TrimSpace(tool)
+			}
+		}
 
 		// 创建聊天应用
-		chatApp := ui.NewChatApp(modelName)
+		chatApp := chat.NewChatApp(modelName, tools)
 
 		// 运行聊天界面
 		fmt.Printf("启动与Model %s 的聊天会话...\n", modelName)
@@ -46,6 +58,7 @@ func init() {
 
 	// 为 chat 子命令添加参数
 	chatCmd.Flags().StringP("model", "m", "", "指定要聊天的Model")
+	chatCmd.Flags().StringP("tools", "t", "", "指定可以使用的工具，多个工具用逗号分隔")
 
 	// 设置必需的参数
 	chatCmd.MarkFlagRequired("model")

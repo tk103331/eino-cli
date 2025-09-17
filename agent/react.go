@@ -6,6 +6,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 	"github.com/tk103331/eino-cli/config"
@@ -108,6 +109,23 @@ func (r *ReactAgent) Chat(ctx context.Context, prompt string) (string, error) {
 
 	// 返回响应内容
 	return response.Content, nil
+}
+
+// Generate 使用Agent生成响应，支持传入选项
+func (r *ReactAgent) Generate(ctx context.Context, messages []*schema.Message, opts ...agent.AgentOption) (*schema.Message, error) {
+	if r.agent == nil {
+		if err := r.Init(); err != nil {
+			return nil, err
+		}
+	}
+
+	// 使用Agent生成响应
+	response, err := r.agent.Generate(ctx, messages, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("Generate失败: %w", err)
+	}
+
+	return response, nil
 }
 
 // createModel 创建模型

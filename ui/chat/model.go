@@ -1,4 +1,4 @@
-package ui
+package chat
 
 import (
 	"fmt"
@@ -9,15 +9,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ChatMessage 表示一条聊天消息
-type ChatMessage struct {
+// Message 表示一条聊天消息
+type Message struct {
 	Role    string // "user" 或 "assistant"
 	Content string
 }
 
-// ChatModel 是聊天界面的模型
-type ChatModel struct {
-	messages         []ChatMessage
+// ViewModel 是聊天界面的模型
+type ViewModel struct {
+	messages         []Message
 	input            string
 	cursor           int
 	viewport         int
@@ -30,15 +30,15 @@ type ChatModel struct {
 	renderer         *glamour.TermRenderer // markdown渲染器
 }
 
-// NewChatModel 创建新的聊天模型
-func NewChatModel(onSendMsg func(string) error) ChatModel {
+// NewViewModel 创建新的聊天模型
+func NewViewModel(onSendMsg func(string) error) ViewModel {
 	// 创建glamour渲染器
 	renderer, _ := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
 	)
 
-	return ChatModel{
-		messages:         []ChatMessage{},
+	return ViewModel{
+		messages:         []Message{},
 		input:            "",
 		cursor:           0,
 		viewport:         0,
@@ -53,12 +53,12 @@ func NewChatModel(onSendMsg func(string) error) ChatModel {
 }
 
 // Init 初始化模型
-func (m ChatModel) Init() tea.Cmd {
+func (m ViewModel) Init() tea.Cmd {
 	return nil
 }
 
 // Update 处理消息更新
-func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -82,7 +82,7 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if strings.TrimSpace(m.input) != "" {
 				// 添加用户消息
-				userMsg := ChatMessage{
+				userMsg := Message{
 					Role:    "user",
 					Content: m.input,
 				}
@@ -159,7 +159,7 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// 接收到AI完整响应，清空流式内容并结束等待状态
 		if m.streamingContent != "" {
 			// 如果有流式内容，将其作为最终消息添加
-			assistantMsg := ChatMessage{
+			assistantMsg := Message{
 				Role:    "assistant",
 				Content: m.streamingContent,
 			}
@@ -167,7 +167,7 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.streamingContent = ""
 		} else {
 			// 如果没有流式内容，直接添加完整响应
-			assistantMsg := ChatMessage{
+			assistantMsg := Message{
 				Role:    "assistant",
 				Content: string(msg),
 			}
@@ -187,7 +187,7 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.isWaiting = false
 		// 清空流式内容
 		if m.streamingContent != "" {
-			assistantMsg := ChatMessage{
+			assistantMsg := Message{
 				Role:    "assistant",
 				Content: m.streamingContent,
 			}
@@ -200,9 +200,8 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View 渲染界面
 // renderMarkdown 渲染markdown内容
-func (m *ChatModel) renderMarkdown(content string) string {
+func (m *ViewModel) renderMarkdown(content string) string {
 	if m.renderer == nil {
 		return content // 如果渲染器未初始化，返回原始内容
 	}
@@ -215,7 +214,8 @@ func (m *ChatModel) renderMarkdown(content string) string {
 	return strings.TrimSpace(rendered)
 }
 
-func (m ChatModel) View() string {
+// View 渲染界面
+func (m ViewModel) View() string {
 	// 样式定义
 	userStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#00ff00")).
@@ -294,24 +294,24 @@ func (m ChatModel) View() string {
 	// 构建帮助信息
 	helpText := "Press 'q' or Ctrl+C to quit, ↑/↓ to scroll, Enter to send"
 
-	return fmt.Sprintf("%s\n\n%s\n\n%s", messageArea, inputArea, helpText)
+	return fmt.Sprintf("%s\n\n%s\n%s", messageArea, inputArea, helpText)
 }
 
 // AddMessage 添加消息到聊天历史
-func (m *ChatModel) AddMessage(role, content string) {
-	m.messages = append(m.messages, ChatMessage{
+func (m *ViewModel) AddMessage(role, content string) {
+	m.messages = append(m.messages, Message{
 		Role:    role,
 		Content: content,
 	})
 }
 
 // SetWaiting 设置等待状态
-func (m *ChatModel) SetWaiting(waiting bool) {
+func (m *ViewModel) SetWaiting(waiting bool) {
 	m.isWaiting = waiting
 }
 
 // SetError 设置错误信息
-func (m *ChatModel) SetError(err string) {
+func (m *ViewModel) SetError(err string) {
 	m.errorMsg = err
 	m.isWaiting = false
 }

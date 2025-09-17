@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/tk103331/eino-cli/config"
@@ -45,6 +46,13 @@ func Execute() {
 }
 
 func init() {
+	// 获取用户主目录
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "."
+	}
+	defaultConfigPath := filepath.Join(homeDir, ".eino-cli", "config.yml")
+	
 	// 添加全局参数
-	RootCmd.PersistentFlags().StringVar(&configPath, "config", "config.yml", "配置文件路径")
+	RootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "配置文件路径")
 }
