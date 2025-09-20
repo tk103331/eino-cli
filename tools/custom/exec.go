@@ -119,8 +119,10 @@ func (e *ExecTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 func (e *ExecTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
 	// 解析参数
 	var args map[string]interface{}
-	if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
-		return "", fmt.Errorf("解析参数失败: %v", err)
+	if argumentsInJSON != "" {
+		if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
+			return "", fmt.Errorf("解析参数失败: %v", err)
+		}
 	}
 
 	// 渲染命令模板
@@ -190,95 +192,6 @@ func (e *ExecTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	}
 
 	return result, nil
-}
-
-// Run 运行执行工具
-func (e *ExecTool) Run() func(ctx context.Context, arguments string, opts ...tool.Option) (content string, err error) {
-	return func(ctx context.Context, arguments string, opts ...tool.Option) (content string, err error) {
-		// 解析参数
-		var args map[string]interface{}
-		if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-			return "", fmt.Errorf("解析参数失败: %v", err)
-		}
-
-		// 获取命令配置
-		cmdTemplate := ""
-		if cmdValue, exists := e.config.Config["cmd"]; exists {
-			cmdTemplate = cmdValue.String()
-		}
-		if cmdTemplate == "" {
-			return "", fmt.Errorf("命令配置为空")
-		}
-
-		// 渲染命令模板
-		cmdStr, err := e.renderTemplate(cmdTemplate, args)
-		if err != nil {
-			return "", fmt.Errorf("渲染命令模板失败: %v", err)
-		}
-
-		// 解析命令和参数
-		cmdParts := strings.Fields(cmdStr)
-		if len(cmdParts) == 0 {
-			return "", fmt.Errorf("命令为空")
-		}
-
-		// 创建命令
-		cmd := exec.CommandContext(ctx, cmdParts[0], cmdParts[1:]...)
-
-		// 设置工作目录
-		if dir, exists := e.config.Config["dir"]; exists && dir.String() != "" {
-			workDir := dir.String()
-			// 处理 ~ 符号
-			if strings.HasPrefix(workDir, "~/") {
-				homeDir, err := os.UserHomeDir()
-				if err != nil {
-					return "", fmt.Errorf("获取用户主目录失败: %v", err)
-				}
-				workDir = strings.Replace(workDir, "~", homeDir, 1)
-			}
-			cmd.Dir = workDir
-		}
-
-		// 设置环境变量
-		cmd.Env = os.Environ()
-		if env, exists := e.config.Config["env"]; exists {
-			envMap := env.Map()
-			for key, value := range envMap {
-				envValue, err := e.renderTemplate(value.String(), args)
-				if err != nil {
-					return "", fmt.Errorf("渲染环境变量模板失败: %v", err)
-				}
-				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", key, envValue))
-			}
-		}
-
-		// 执行命令并捕获输出
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-
-		err = cmd.Run()
-		if err != nil {
-			// 如果命令执行失败，返回错误信息和stderr
-			errorMsg := fmt.Sprintf("命令执行失败: %v", err)
-			if stderr.Len() > 0 {
-				errorMsg += fmt.Sprintf("\nstderr: %s", stderr.String())
-			}
-			if stdout.Len() > 0 {
-				errorMsg += fmt.Sprintf("\nstdout: %s", stdout.String())
-			}
-			return "", fmt.Errorf(errorMsg)
-		}
-
-		// 返回标准输出
-		result := stdout.String()
-		if stderr.Len() > 0 {
-			// 如果有stderr但命令成功执行，将stderr作为警告信息附加
-			result += fmt.Sprintf("\n[警告] %s", stderr.String())
-		}
-
-		return result, nil
-	}
 }
 
 // renderTemplate 渲染模板

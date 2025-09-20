@@ -227,9 +227,10 @@ func (m ViewModel) View() string {
 	inputStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("62")).
-		Padding(0, 1)
+		Padding(0, 1).
+		Width(m.width - 4) // 减去边框和内边距的宽度
 
-	prompt := "输入消息: "
+	prompt := "> "
 	input := m.input
 	if m.cursor < len(input) {
 		input = input[:m.cursor] + "|" + input[m.cursor:]

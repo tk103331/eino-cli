@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"fmt"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
@@ -125,7 +124,8 @@ func (app *ChatApp) processConversation(ctx context.Context, messages []*schema.
 		// 处理流式响应
 		var fullContent string
 		var assistantMessage *schema.Message
-		
+		var allToolCalls []schema.ToolCall
+
 		for {
 			chunk, err := streamReader.Recv()
 			if err != nil {
@@ -141,11 +141,22 @@ func (app *ChatApp) processConversation(ctx context.Context, messages []*schema.
 			// 累积内容并发送增量更新
 			fullContent += chunk.Content
 			app.program.Send(StreamChunkMsg(chunk.Content))
-			
+
+			// 检查当前chunk是否包含工具调用
+			if len(chunk.ToolCalls) > 0 {
+				// 累积所有工具调用
+				allToolCalls = append(allToolCalls, chunk.ToolCalls...)
+			}
+
 			// 保存完整的助手消息（包含可能的工具调用）
 			assistantMessage = chunk
 		}
 		streamReader.Close()
+
+		// 如果累积了工具调用，将它们合并到最终的助手消息中
+		if len(allToolCalls) > 0 && assistantMessage != nil {
+			assistantMessage.ToolCalls = allToolCalls
+		}
 
 		// 检查是否有工具调用
 		if assistantMessage != nil && len(assistantMessage.ToolCalls) > 0 {
@@ -207,15 +218,19 @@ func (app *ChatApp) executeToolCalls(ctx context.Context, toolCalls []schema.Too
 	for _, toolCall := range toolCalls {
 		toolName := toolCall.Function.Name
 		arguments := toolCall.Function.Arguments
-
+		if toolName == "" {
+			continue
+		}
 		// 查找工具实例
 		toolInstance, exists := toolMap[toolName]
 		if !exists {
 			// 工具不存在，返回错误消息
 			errorMsg := fmt.Sprintf("工具 '%s' 不存在", toolName)
-			toolMessage := schema.ToolMessage(errorMsg, toolCall.ID)
-			toolMessage.ToolName = toolName
+			toolMessage := schema.ToolMessage(errorMsg, toolCall.ID, schema.WithToolName(toolName))
 			toolMessages = append(toolMessages, toolMessage)
+
+			// 显示工具不存在错误
+			app.program.Send(StreamChunkMsg(fmt.Sprintf("❌ 工具 '%s' 不存在\n", toolName)))
 			continue
 		}
 
@@ -227,20 +242,22 @@ func (app *ChatApp) executeToolCalls(ctx context.Context, toolCalls []schema.Too
 		if err != nil {
 			// 工具执行失败，返回错误消息
 			errorMsg := fmt.Sprintf("工具执行失败: %v", err)
-			toolMessage := schema.ToolMessage(errorMsg, toolCall.ID)
-			toolMessage.ToolName = toolName
+			toolMessage := schema.ToolMessage(errorMsg, toolCall.ID, schema.WithToolName(toolName))
 			toolMessages = append(toolMessages, toolMessage)
-			
+
 			// 显示工具执行错误
 			app.program.Send(StreamChunkMsg(fmt.Sprintf("❌ 工具执行失败: %v\n", err)))
 		} else {
 			// 工具执行成功，返回结果
-			toolMessage := schema.ToolMessage(result, toolCall.ID)
-			toolMessage.ToolName = toolName
+			toolMessage := schema.ToolMessage(result, toolCall.ID, schema.WithToolName(toolName))
 			toolMessages = append(toolMessages, toolMessage)
-			
-			// 显示工具执行结果
-			app.program.Send(StreamChunkMsg(fmt.Sprintf("✅ 工具执行结果: %s\n", result)))
+
+			// 显示工具执行结果（限制长度以避免UI过于冗长）
+			displayResult := result
+			if len(result) > 500 {
+				displayResult = result[:500] + "...(结果已截断)"
+			}
+			app.program.Send(StreamChunkMsg(fmt.Sprintf("✅ 工具执行结果: %s\n", displayResult)))
 		}
 	}
 

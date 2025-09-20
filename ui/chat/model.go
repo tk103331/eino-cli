@@ -232,7 +232,8 @@ func (m ViewModel) View() string {
 	inputStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#666666")).
-		Padding(0, 1)
+		Padding(0, 1).
+		Width(m.width - 4) // 减去边框和内边距的宽度
 
 	// 构建消息显示区域
 	var messageLines []string
@@ -285,7 +286,7 @@ func (m ViewModel) View() string {
 	messageArea := strings.Join(messageLines, "\n")
 
 	// 构建输入区域
-	inputPrompt := "Enter message: "
+	inputPrompt := "> "
 	if m.isWaiting {
 		inputPrompt = "Waiting for response... "
 	}

@@ -126,8 +126,10 @@ func (h *HTTPTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 func (h *HTTPTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
 	// 解析参数
 	var args map[string]interface{}
-	if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
-		return "", fmt.Errorf("解析参数失败: %v", err)
+	if argumentsInJSON != "" {
+		if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
+			return "", fmt.Errorf("解析参数失败: %v", err)
+		}
 	}
 
 	// 模板替换URL
@@ -183,85 +185,6 @@ func (h *HTTPTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	}
 
 	return string(respBody), nil
-}
-
-// Run 运行HTTP工具
-func (h *HTTPTool) Run() func(ctx context.Context, arguments string, opts ...tool.Option) (content string, err error) {
-	return func(ctx context.Context, arguments string, opts ...tool.Option) (content string, err error) {
-		// 解析参数
-		var args map[string]interface{}
-		if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-			return "", fmt.Errorf("解析参数失败: %v", err)
-		}
-
-		// 获取配置
-		url := ""
-		if urlValue, exists := h.config.Config["url"]; exists {
-			url = urlValue.String()
-		}
-		method := ""
-		if methodValue, exists := h.config.Config["method"]; exists {
-			method = methodValue.String()
-		}
-		if method == "" {
-			method = "GET"
-		}
-
-		// 模板替换URL
-		url, err = h.renderTemplate(url, args)
-		if err != nil {
-			return "", fmt.Errorf("渲染URL模板失败: %v", err)
-		}
-
-		// 准备请求体
-		var body io.Reader
-		if bodyTemplate, exists := h.config.Config["body"]; exists && bodyTemplate.String() != "" {
-			bodyStr, err := h.renderTemplate(bodyTemplate.String(), args)
-			if err != nil {
-				return "", fmt.Errorf("渲染请求体模板失败: %v", err)
-			}
-			body = strings.NewReader(bodyStr)
-		}
-
-		// 创建HTTP请求
-		req, err := http.NewRequestWithContext(ctx, method, url, body)
-		if err != nil {
-			return "", fmt.Errorf("创建HTTP请求失败: %v", err)
-		}
-
-		// 设置请求头
-		if headers, exists := h.config.Config["headers"]; exists {
-			headerMap := headers.Map()
-			for key, value := range headerMap {
-				headerValue, err := h.renderTemplate(value.String(), args)
-				if err != nil {
-					return "", fmt.Errorf("渲染请求头模板失败: %v", err)
-				}
-				req.Header.Set(key, headerValue)
-			}
-		}
-
-		// 发送HTTP请求
-		client := &http.Client{}
-		resp, err := client.Do(req)
-		if err != nil {
-			return "", fmt.Errorf("发送HTTP请求失败: %v", err)
-		}
-		defer resp.Body.Close()
-
-		// 读取响应
-		respBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return "", fmt.Errorf("读取响应失败: %v", err)
-		}
-
-		// 检查HTTP状态码
-		if resp.StatusCode >= 400 {
-			return "", fmt.Errorf("HTTP请求失败，状态码: %d, 响应: %s", resp.StatusCode, string(respBody))
-		}
-
-		return string(respBody), nil
-	}
 }
 
 // renderTemplate 渲染模板
