@@ -26,21 +26,38 @@ var chatCmd = &cobra.Command{
 		}
 
 		// 获取参数
+		presetName, _ := cmd.Flags().GetString("chat")
 		modelName, _ := cmd.Flags().GetString("model")
 		toolsStr, _ := cmd.Flags().GetString("tools")
 
-		// 解析工具列表
+		var system string
 		var tools []string
-		if toolsStr != "" {
-			tools = strings.Split(toolsStr, ",")
-			// 去除空格
-			for i, tool := range tools {
-				tools[i] = strings.TrimSpace(tool)
+
+		if presetName != "" {
+			// 使用 chats 预设
+			preset, ok := cfg.Chats[presetName]
+			if !ok {
+				return fmt.Errorf("chat 预设不存在: %s", presetName)
+			}
+			modelName = preset.Model
+			tools = append(tools, preset.Tools...)
+			system = preset.System
+		} else {
+			// 解析工具列表
+			if toolsStr != "" {
+				tools = strings.Split(toolsStr, ",")
+				// 去除空格
+				for i, tool := range tools {
+					tools[i] = strings.TrimSpace(tool)
+				}
+			}
+			if modelName == "" {
+				return fmt.Errorf("必须指定 --model 或者 --chat 预设名称")
 			}
 		}
 
 		// 创建聊天应用
-		chatApp := chat.NewChatApp(modelName, tools)
+		chatApp := chat.NewChatApp(modelName, tools, system)
 
 		// 运行聊天界面
 		fmt.Printf("启动与Model %s 的聊天会话...\n", modelName)
@@ -57,9 +74,10 @@ func init() {
 	RootCmd.AddCommand(chatCmd)
 
 	// 为 chat 子命令添加参数
-	chatCmd.Flags().StringP("model", "m", "", "指定要聊天的Model")
-	chatCmd.Flags().StringP("tools", "t", "", "指定可以使用的工具，多个工具用逗号分隔")
+	chatCmd.Flags().StringP("chat", "c", "", "指定 chat 预设名称（来自配置文件 chats）")
+	chatCmd.Flags().StringP("model", "m", "", "指定要聊天的Model（未指定 --chat 时必填）")
+	chatCmd.Flags().StringP("tools", "t", "", "指定可以使用的工具，多个工具用逗号分隔（未指定 --chat 时可选）")
 
-	// 设置必需的参数
-	chatCmd.MarkFlagRequired("model")
+	// 不再强制 --model 必填，由运行时校验根据 --chat 决定
+	// chatCmd.MarkFlagRequired("model")
 }

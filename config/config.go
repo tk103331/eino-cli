@@ -19,6 +19,7 @@ type Config struct {
 	DefaultModel string               `yaml:"default_model,omitempty"`
 	MCPServers   map[string]MCPServer `yaml:"mcp_servers,omitempty"`
 	Tools        map[string]Tool      `yaml:"tools,omitempty"`
+	Chats        map[string]Chat      `yaml:"chats,omitempty"`
 	Settings     Settings             `yaml:"settings,omitempty"`
 }
 
@@ -28,6 +29,13 @@ type Agent struct {
 	Model      string   `yaml:"model"`
 	Tools      []string `yaml:"tools,omitempty"`
 	MCPServers []string `yaml:"mcp_servers,omitempty"`
+}
+
+// Chat 表示预设聊天配置
+type Chat struct {
+	System string   `yaml:"system,omitempty"`
+	Model  string   `yaml:"model"`
+	Tools  []string `yaml:"tools,omitempty"`
 }
 
 // Provider 表示AI提供商配置

@@ -17,13 +17,14 @@ type ChatApp struct {
 	modelFactory *models.Factory
 	modelName    string
 	tools        []string
+	system       string
 	program      *tea.Program
 	model        *ViewModel
 	chatModel    model.ToolCallingChatModel
 }
 
 // NewChatApp 创建新的聊天应用
-func NewChatApp(modelName string, tools []string) *ChatApp {
+func NewChatApp(modelName string, tools []string, system string) *ChatApp {
 	cfg := config.GetConfig()
 	factory := models.NewFactory(cfg)
 
@@ -31,6 +32,7 @@ func NewChatApp(modelName string, tools []string) *ChatApp {
 		modelFactory: factory,
 		modelName:    modelName,
 		tools:        tools,
+		system:       system,
 	}
 
 	// 创建聊天模型，传入发送消息的回调函数
@@ -94,10 +96,12 @@ func (app *ChatApp) sendMessage(message string) error {
 	go func() {
 		ctx := context.Background()
 
-		// 创建用户消息
-		messages := []*schema.Message{
-			schema.UserMessage(message),
+		// 创建消息列表，包含可选的system提示
+		var messages []*schema.Message
+		if app.system != "" {
+			messages = append(messages, schema.SystemMessage(app.system))
 		}
+		messages = append(messages, schema.UserMessage(message))
 
 		// 开始对话循环，处理工具调用
 		app.processConversation(ctx, messages)
