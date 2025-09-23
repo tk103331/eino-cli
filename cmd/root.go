@@ -27,10 +27,17 @@ var RootCmd = &cobra.Command{
 			return fmt.Errorf("加载配置文件失败: %w", err)
 		}
 
-		// 初始化MCP管理器
-		if err := mcp.InitializeGlobalManager(context.Background(), cfg); err != nil {
-			return fmt.Errorf("初始化MCP管理器失败: %w", err)
-		}
+		// 异步初始化MCP管理器（不阻塞命令执行）
+		go func() {
+			// 使用命令上下文，便于在命令结束时取消
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			if err := mcp.InitializeGlobalManager(ctx, cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "异步初始化MCP管理器失败: %v\n", err)
+			}
+		}()
 
 		return nil
 	},
@@ -52,7 +59,7 @@ func init() {
 		homeDir = "."
 	}
 	defaultConfigPath := filepath.Join(homeDir, ".eino-cli", "config.yml")
-	
+
 	// 添加全局参数
 	RootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "配置文件路径")
 }

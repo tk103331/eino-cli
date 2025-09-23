@@ -1,6 +1,6 @@
 # Eino CLI
 
-[English](README_EN.md) | 中文
+[English](README.md) | 中文
 
 Eino CLI 是一个基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框架的智能 AI Agent 命令行工具。它提供了强大的 Agent 系统，支持多种工具集成和多个 AI 模型提供商，让您能够轻松构建和运行自定义的 AI Agent。
 
