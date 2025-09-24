@@ -13,7 +13,7 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// AgentApp Agent交互应用结构
+// AgentApp represents an interactive Agent application structure
 type AgentApp struct {
 	agentFactory *agentpkg.Factory
 	agentName    string
@@ -41,11 +41,13 @@ func NewAgentApp(agentName string) *AgentApp {
 	app.handler = callbacks.NewHandlerBuilder().
 		OnStartFn(func(ctx context.Context, info *callbacks.RunInfo, input callbacks.CallbackInput) context.Context {
 			// 发送开始消息到UI
+			app.program.Send(StepStartMsg(info.Name))
 			app.program.Send(StreamChunkMsg(fmt.Sprintf("🚀 开始执行: %s\n", info.Name)))
 			return ctx
 		}).
 		OnEndFn(func(ctx context.Context, info *callbacks.RunInfo, output callbacks.CallbackOutput) context.Context {
 			// 发送完成消息到UI
+			app.program.Send(StepEndMsg(info.Name))
 			app.program.Send(StreamChunkMsg(fmt.Sprintf("✅ 完成执行: %s\n", info.Name)))
 			return ctx
 		}).
