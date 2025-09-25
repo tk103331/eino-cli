@@ -3,17 +3,17 @@ package agent
 import (
 	"context"
 	"fmt"
+	"io"
+
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
-	"github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 	"github.com/tk103331/eino-cli/config"
 	"github.com/tk103331/eino-cli/mcp"
 	"github.com/tk103331/eino-cli/models"
 )
-
 // ReactAgent 实现了使用cloudwego/eino库的React模式的Agent
 type ReactAgent struct {
 	config    *config.Agent
@@ -76,14 +76,17 @@ func (r *ReactAgent) Run(prompt string) error {
 		schema.UserMessage(prompt),
 	}
 
-	// 使用Agent生成响应
+	// 使用react.Generate方法生成响应
 	response, err := r.agent.Generate(r.ctx, messages)
 	if err != nil {
 		return fmt.Errorf("运行Agent失败: %w", err)
 	}
 
-	// 打印响应
-	fmt.Println(response.Content)
+	// 打印响应内容
+	if response.Content != "" {
+		fmt.Print(response.Content)
+	}
+	fmt.Println() // 添加换行
 	return nil
 }
 
@@ -101,31 +104,31 @@ func (r *ReactAgent) Chat(ctx context.Context, prompt string) (string, error) {
 		schema.UserMessage(prompt),
 	}
 
-	// 使用Agent生成响应
-	response, err := r.agent.Generate(ctx, messages)
+	// 使用react.Stream方法生成流式响应
+	streamReader, err := r.agent.Stream(ctx, messages)
 	if err != nil {
 		return "", fmt.Errorf("Chat失败: %w", err)
 	}
+	defer streamReader.Close()
 
-	// 返回响应内容
-	return response.Content, nil
-}
+	// 收集所有流式响应内容
+	var content string
+	for {
+		chunk, err := streamReader.Recv()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", fmt.Errorf("读取流式响应失败: %w", err)
+		}
 
-// Generate 使用Agent生成响应，支持传入选项
-func (r *ReactAgent) Generate(ctx context.Context, messages []*schema.Message, opts ...agent.AgentOption) (*schema.Message, error) {
-	if r.agent == nil {
-		if err := r.Init(); err != nil {
-			return nil, err
+		// 累积内容
+		if chunk.Content != "" {
+			content += chunk.Content
 		}
 	}
 
-	// 使用Agent生成响应
-	response, err := r.agent.Generate(ctx, messages, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("Generate失败: %w", err)
-	}
-
-	return response, nil
+	return content, nil
 }
 
 // createModel 创建模型

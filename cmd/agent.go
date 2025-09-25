@@ -33,7 +33,10 @@ var agentCmd = &cobra.Command{
 		}
 
 		// 创建Agent交互应用
-		agentApp := agent.NewAgentApp(agentName)
+		agentApp, err := agent.NewAgentApp(agentName)
+		if err != nil {
+			return fmt.Errorf("创建Agent应用失败: %w", err)
+		}
 
 		// 运行交互界面
 		fmt.Printf("启动与Agent %s 的交互会话...\n", agentName)
