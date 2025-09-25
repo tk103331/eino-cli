@@ -9,10 +9,23 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// MessageType 消息类型
+type MessageType int
+
+const (
+	UserMessage MessageType = iota
+	AssistantMessage
+	ToolStartMessage
+	ToolEndMessage
+	ErrorMessage
+)
+
 // Message 表示一条聊天消息
 type Message struct {
-	Role    string // "user" 或 "assistant"
+	Type    MessageType
+	Role    string // "user" 或 "assistant" (保持向后兼容)
 	Content string
+	Name    string // 工具名称（仅用于工具消息）
 }
 
 // ViewModel 是聊天界面的模型
@@ -83,6 +96,7 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.TrimSpace(m.input) != "" {
 				// 添加用户消息
 				userMsg := Message{
+					Type:    UserMessage,
 					Role:    "user",
 					Content: m.input,
 				}
@@ -160,6 +174,7 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.streamingContent != "" {
 			// 如果有流式内容，将其作为最终消息添加
 			assistantMsg := Message{
+				Type:    AssistantMessage,
 				Role:    "assistant",
 				Content: m.streamingContent,
 			}
@@ -168,6 +183,7 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			// 如果没有流式内容，直接添加完整响应
 			assistantMsg := Message{
+				Type:    AssistantMessage,
 				Role:    "assistant",
 				Content: string(msg),
 			}
@@ -181,6 +197,24 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.streamingContent += string(msg)
 		return m, nil
 
+	case ToolStartMsg:
+		// 工具开始执行
+		m.messages = append(m.messages, Message{
+			Type:    ToolStartMessage,
+			Content: fmt.Sprintf("🔧 调用工具: %s\n参数: %s", msg.Name, msg.Arguments),
+			Name:    msg.Name,
+		})
+		return m, nil
+
+	case ToolEndMsg:
+		// 工具执行结束
+		m.messages = append(m.messages, Message{
+			Type:    ToolEndMessage,
+			Content: fmt.Sprintf("✅ 工具 %s 执行结果:\n%s", msg.Name, msg.Result),
+			Name:    msg.Name,
+		})
+		return m, nil
+
 	case ErrorMsg:
 		// 接收到错误消息
 		m.errorMsg = string(msg)
@@ -188,6 +222,7 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// 清空流式内容
 		if m.streamingContent != "" {
 			assistantMsg := Message{
+				Type:    AssistantMessage,
 				Role:    "assistant",
 				Content: m.streamingContent,
 			}
@@ -225,6 +260,14 @@ func (m ViewModel) View() string {
 		Foreground(lipgloss.Color("#0099ff")).
 		Bold(true)
 
+	toolStartStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#ffaa00")).
+		Bold(true)
+
+	toolEndStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#00aa00")).
+		Bold(true)
+
 	errorStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#ff0000")).
 		Bold(true)
@@ -247,12 +290,28 @@ func (m ViewModel) View() string {
 	}
 
 	for _, msg := range visibleMessages {
-		if msg.Role == "user" {
+		switch msg.Type {
+		case UserMessage:
 			messageLines = append(messageLines, userStyle.Render("You: ")+msg.Content)
-		} else {
+		case AssistantMessage:
 			// 对AI回复使用markdown渲染
 			renderedContent := m.renderMarkdown(msg.Content)
 			messageLines = append(messageLines, assistantStyle.Render("AI: ")+renderedContent)
+		case ToolStartMessage:
+			messageLines = append(messageLines, toolStartStyle.Render(msg.Content))
+		case ToolEndMessage:
+			messageLines = append(messageLines, toolEndStyle.Render(msg.Content))
+		case ErrorMessage:
+			messageLines = append(messageLines, errorStyle.Render("Error: ")+msg.Content)
+		default:
+			// 向后兼容：基于Role字段处理
+			if msg.Role == "user" {
+				messageLines = append(messageLines, userStyle.Render("You: ")+msg.Content)
+			} else {
+				// 对AI回复使用markdown渲染
+				renderedContent := m.renderMarkdown(msg.Content)
+				messageLines = append(messageLines, assistantStyle.Render("AI: ")+renderedContent)
+			}
 		}
 		messageLines = append(messageLines, "")
 	}
@@ -298,9 +357,20 @@ func (m ViewModel) View() string {
 	return fmt.Sprintf("%s\n\n%s\n%s", messageArea, inputArea, helpText)
 }
 
-// AddMessage 添加消息到聊天历史
+// AddMessage 添加消息（保持向后兼容）
 func (m *ViewModel) AddMessage(role, content string) {
+	var msgType MessageType
+	switch role {
+	case "user":
+		msgType = UserMessage
+	case "assistant":
+		msgType = AssistantMessage
+	default:
+		msgType = AssistantMessage
+	}
+	
 	m.messages = append(m.messages, Message{
+		Type:    msgType,
 		Role:    role,
 		Content: content,
 	})
@@ -317,11 +387,15 @@ func (m *ViewModel) SetError(err string) {
 	m.isWaiting = false
 }
 
-// ResponseMsg 表示AI响应消息
+// 消息类型定义
 type ResponseMsg string
-
-// StreamChunkMsg 表示流式响应的增量消息
 type StreamChunkMsg string
-
-// ErrorMsg 表示错误消息
 type ErrorMsg string
+type ToolStartMsg struct {
+	Name      string
+	Arguments string
+}
+type ToolEndMsg struct {
+	Name   string
+	Result string
+}

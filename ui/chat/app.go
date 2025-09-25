@@ -2,11 +2,13 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"github.com/tk103331/eino-cli/agent"
 	"github.com/tk103331/eino-cli/config"
 	"github.com/tk103331/eino-cli/models"
 	"github.com/tk103331/eino-cli/tools"
@@ -15,21 +17,25 @@ import (
 // ChatApp 聊天应用结构
 type ChatApp struct {
 	modelFactory *models.Factory
+	agentFactory *agent.Factory
 	modelName    string
 	tools        []string
 	system       string
 	program      *tea.Program
 	model        *ViewModel
 	chatModel    model.ToolCallingChatModel
+	reactAgent   agent.Agent
 }
 
 // NewChatApp 创建新的聊天应用
 func NewChatApp(modelName string, tools []string, system string) *ChatApp {
 	cfg := config.GetConfig()
 	factory := models.NewFactory(cfg)
+	agentFactory := agent.NewFactory(cfg)
 
 	app := &ChatApp{
 		modelFactory: factory,
+		agentFactory: agentFactory,
 		modelName:    modelName,
 		tools:        tools,
 		system:       system,
@@ -53,6 +59,103 @@ func (app *ChatApp) Run() error {
 
 // sendMessage 发送消息给AI模型
 func (app *ChatApp) sendMessage(message string) error {
+	// 如果有工具配置，使用ReactAgent的ChatWithCallback方法
+	if len(app.tools) > 0 {
+		return app.sendMessageWithAgent(message)
+	}
+
+	// 否则使用原有的模型直接调用方式
+	return app.sendMessageWithModel(message)
+}
+
+// sendMessageWithAgent 使用ReactAgent发送消息，支持工具调用回调
+func (app *ChatApp) sendMessageWithAgent(message string) error {
+	// 创建临时Agent配置
+	if app.reactAgent == nil {
+		agentConfig := config.Agent{
+			System: app.system,
+			Model:  app.modelName,
+			Tools:  app.tools,
+		}
+
+		// 创建ReactAgent实例
+		reactAgent := agent.NewReactAgent("temp_chat_agent", &agentConfig)
+		if err := reactAgent.Init(); err != nil {
+			app.program.Send(ErrorMsg(fmt.Sprintf("初始化Agent失败: %v", err)))
+			return err
+		}
+		app.reactAgent = reactAgent
+	}
+
+	// 在后台运行Agent并获取响应
+	go func() {
+		ctx := context.Background()
+
+		// 创建工具调用回调函数
+		callback := func(data interface{}) {
+			switch v := data.(type) {
+			case string:
+				// 流式内容
+				app.program.Send(StreamChunkMsg(v))
+			case map[string]interface{}:
+				// 工具调用信息
+				if toolType, ok := v["type"].(string); ok {
+					switch toolType {
+					case "tool_start":
+						if toolName, ok := v["tool_name"].(string); ok {
+							var inputStr string
+							if input := v["input"]; input != nil {
+								if inputBytes, err := json.Marshal(input); err == nil {
+									inputStr = string(inputBytes)
+								}
+							}
+							app.program.Send(ToolStartMsg{
+								Name:      toolName,
+								Arguments: inputStr,
+							})
+						}
+					case "tool_end":
+						if toolName, ok := v["tool_name"].(string); ok {
+							var outputStr string
+							if output := v["output"]; output != nil {
+								if outputBytes, err := json.Marshal(output); err == nil {
+									outputStr = string(outputBytes)
+								}
+							}
+							app.program.Send(ToolEndMsg{
+								Name:   toolName,
+								Result: outputStr,
+							})
+						}
+					case "tool_error":
+						if toolName, ok := v["tool_name"].(string); ok {
+							if errorMsg, ok := v["error"].(string); ok {
+								app.program.Send(ErrorMsg(fmt.Sprintf("工具 %s 执行错误: %s", toolName, errorMsg)))
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 使用Agent的ChatWithCallback方法生成响应
+		response, err := app.reactAgent.ChatWithCallback(ctx, message, callback)
+		if err != nil {
+			app.program.Send(ErrorMsg(fmt.Sprintf("AI响应错误: %v", err)))
+			return
+		}
+
+		// 发送完整响应
+		if response != "" {
+			app.program.Send(ResponseMsg(response))
+		}
+	}()
+
+	return nil
+}
+
+// sendMessageWithModel 使用原有的模型直接调用方式发送消息
+func (app *ChatApp) sendMessageWithModel(message string) error {
 	// 创建模型实例（如果还没有创建）
 	if app.chatModel == nil {
 		ctx := context.Background()

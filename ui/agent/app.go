@@ -102,8 +102,32 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 		return
 	}
 
-	// 使用Agent的Chat方法生成响应
-	response, err := app.agent.Chat(app.ctx, prompt)
+	// 创建工具调用回调函数
+	callback := func(msg interface{}) {
+		switch v := msg.(type) {
+		case struct {
+			Name      string
+			Arguments string
+		}:
+			// 工具开始执行
+			app.program.Send(ToolStartMsg{
+				Name:      v.Name,
+				Arguments: v.Arguments,
+			})
+		case struct {
+			Name   string
+			Result string
+		}:
+			// 工具执行结束
+			app.program.Send(ToolEndMsg{
+				Name:   v.Name,
+				Result: v.Result,
+			})
+		}
+	}
+
+	// 使用Agent的ChatWithCallback方法生成响应
+	response, err := app.agent.ChatWithCallback(app.ctx, prompt, callback)
 	if err != nil {
 		app.program.Send(ErrorMsg(fmt.Sprintf("AI响应错误: %v", err)))
 		return

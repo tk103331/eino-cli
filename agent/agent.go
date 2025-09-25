@@ -10,4 +10,6 @@ type Agent interface {
 	Run(prompt string) error
 	// Chat 进行对话，返回响应内容
 	Chat(ctx context.Context, prompt string) (string, error)
+	// ChatWithCallback 进行对话，支持工具调用回调
+	ChatWithCallback(ctx context.Context, prompt string, callback func(interface{})) (string, error)
 }
