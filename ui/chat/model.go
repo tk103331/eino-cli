@@ -82,14 +82,14 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.isWaiting {
 			// 等待响应时只允许退出
 			switch msg.String() {
-			case "ctrl+c", "q":
+			case "ctrl+c":
 				return m, tea.Quit
 			}
 			return m, nil
 		}
 
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
 			return m, tea.Quit
 
 		case "enter":
@@ -147,11 +147,10 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		default:
-			// 调试：记录所有键盘输入事件
 			keyStr := msg.String()
 
-			// 简化过滤逻辑 - 只过滤明确的控制键
-			if keyStr == "ctrl+c" || keyStr == "q" {
+			// 过滤控制键
+			if keyStr == "ctrl+c" {
 				return m, tea.Quit
 			}
 
@@ -199,26 +198,47 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ToolStartMsg:
 		// 工具开始执行
+		content := fmt.Sprintf("Calling tool: %s", msg.Name)
+		if msg.Arguments != "" && msg.Arguments != "{}" {
+			content += fmt.Sprintf("\nArguments: %s", msg.Arguments)
+		}
 		m.messages = append(m.messages, Message{
 			Type:    ToolStartMessage,
-			Content: fmt.Sprintf("🔧 调用工具: %s\n参数: %s", msg.Name, msg.Arguments),
+			Content: content,
 			Name:    msg.Name,
 		})
 		return m, nil
 
 	case ToolEndMsg:
 		// 工具执行结束
+		content := fmt.Sprintf("Tool %s completed", msg.Name)
+		if msg.Result != "" {
+			// 清理结果，移除多余的换行符
+			result := strings.TrimSpace(msg.Result)
+			if len(result) > 200 {
+				// 如果结果太长，截断并添加省略号
+				result = result[:197] + "..."
+			}
+			content += fmt.Sprintf("\nResult: %s", result)
+		}
 		m.messages = append(m.messages, Message{
 			Type:    ToolEndMessage,
-			Content: fmt.Sprintf("✅ 工具 %s 执行结果:\n%s", msg.Name, msg.Result),
+			Content: content,
 			Name:    msg.Name,
 		})
 		return m, nil
 
 	case ErrorMsg:
-		// 接收到错误消息
-		m.errorMsg = string(msg)
+		// 错误消息 - 直接显示所有错误消息（过滤已在应用层处理）
+		errorText := string(msg)
+		m.errorMsg = errorText
 		m.isWaiting = false
+
+		m.messages = append(m.messages, Message{
+			Type:    ErrorMessage,
+			Content: errorText,
+		})
+
 		// 清空流式内容
 		if m.streamingContent != "" {
 			assistantMsg := Message{
@@ -352,7 +372,7 @@ func (m ViewModel) View() string {
 	inputArea := inputStyle.Render(inputPrompt + m.input)
 
 	// 构建帮助信息
-	helpText := "Press 'q' or Ctrl+C to quit, ↑/↓ to scroll, Enter to send"
+	helpText := "Press Ctrl+C to quit, ↑/↓ to scroll, Enter to send"
 
 	return fmt.Sprintf("%s\n\n%s\n%s", messageArea, inputArea, helpText)
 }
@@ -368,7 +388,7 @@ func (m *ViewModel) AddMessage(role, content string) {
 	default:
 		msgType = AssistantMessage
 	}
-	
+
 	m.messages = append(m.messages, Message{
 		Type:    msgType,
 		Role:    role,

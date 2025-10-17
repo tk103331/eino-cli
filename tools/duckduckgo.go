@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino-ext/components/tool/duckduckgo"
 	"github.com/cloudwego/eino-ext/components/tool/duckduckgo/ddgsearch"
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/tk103331/eino-cli/config"
 )
 

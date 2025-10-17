@@ -34,7 +34,7 @@ func NewAgentApp(agentName string) (*AgentApp, error) {
 
 	// 创建Agent工厂
 	factory := agent.NewFactory(cfg)
-	
+
 	// 创建Agent实例
 	agentInstance, err := factory.CreateAgent(agentName)
 	if err != nil {
@@ -49,10 +49,10 @@ func NewAgentApp(agentName string) (*AgentApp, error) {
 
 	// 创建Agent模型，传入发送消息的回调函数
 	agentModel := NewViewModel(app.sendMessage)
-	app.model = &agentModel
+	app.model = agentModel
 
 	// 创建Bubble Tea程序
-	app.program = tea.NewProgram(agentModel, tea.WithAltScreen())
+	app.program = tea.NewProgram(*agentModel, tea.WithAltScreen())
 
 	return app, nil
 }
@@ -71,7 +71,7 @@ func (app *AgentApp) sendMessage(message string) error {
 
 	// 构建消息列表
 	var messages []*schema.Message
-	
+
 	// 添加系统消息（如果有）
 	if agentConfig.System != "" {
 		messages = append(messages, schema.SystemMessage(agentConfig.System))
@@ -86,7 +86,7 @@ func (app *AgentApp) sendMessage(message string) error {
 	return nil
 }
 
-// processConversation 处理对话
+// processConversation 处理对话（使用流式输出）
 func (app *AgentApp) processConversation(messages []*schema.Message) {
 	// 获取最后一条用户消息作为prompt
 	var prompt string
@@ -96,47 +96,79 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 			break
 		}
 	}
-	
+
 	if prompt == "" {
 		app.program.Send(ErrorMsg("未找到用户消息"))
 		return
 	}
 
 	// 创建工具调用回调函数
-	callback := func(msg interface{}) {
+	toolCallback := func(msg interface{}) {
 		switch v := msg.(type) {
 		case struct {
 			Name      string
 			Arguments string
 		}:
-			// 工具开始执行
-			app.program.Send(ToolStartMsg{
-				Name:      v.Name,
-				Arguments: v.Arguments,
-			})
+			// 只发送真正的工具调用，过滤内部组件
+			if !isInternalComponent(v.Name) {
+				app.program.Send(ToolStartMsg{
+					Name:      v.Name,
+					Arguments: v.Arguments,
+				})
+			}
 		case struct {
 			Name   string
 			Result string
 		}:
-			// 工具执行结束
-			app.program.Send(ToolEndMsg{
-				Name:   v.Name,
-				Result: v.Result,
-			})
+			// 只发送真正的工具调用结果，过滤内部组件
+			if !isInternalComponent(v.Name) {
+				app.program.Send(ToolEndMsg{
+					Name:   v.Name,
+					Result: v.Result,
+				})
+			}
+		default:
+			if errMsg, ok := msg.(string); ok {
+				app.program.Send(ErrorMsg(errMsg))
+			}
 		}
 	}
 
-	// 使用Agent的ChatWithCallback方法生成响应
-	response, err := app.agent.ChatWithCallback(app.ctx, prompt, callback)
-	if err != nil {
-		app.program.Send(ErrorMsg(fmt.Sprintf("AI响应错误: %v", err)))
-		return
+	// 创建流式内容回调函数
+	chunkCallback := func(chunk *agent.StreamChunk) {
+		switch chunk.Type {
+		case "content":
+			if chunk.Content != "" {
+				app.program.Send(StreamChunkMsg(chunk.Content))
+			} else {
+				app.program.Send(StreamEndMsg{})
+			}
+		case "error":
+			app.program.Send(ErrorMsg(chunk.Content))
+		}
 	}
 
-	// 发送响应到UI
-	if response != "" {
-		app.program.Send(ResponseMsg(response))
+	// 使用Agent的ChatStream方法进行流式对话
+	err := app.agent.ChatStream(app.ctx, prompt, chunkCallback, toolCallback)
+	if err != nil {
+		app.program.Send(ErrorMsg(fmt.Sprintf("AI响应错误: %v", err)))
 	}
+}
+
+// isInternalComponent 判断是否为内部组件，不应显示给用户
+func isInternalComponent(name string) bool {
+	internalComponents := []string{
+		"ChatModel",
+		"Tools",
+		"ReActAgent",
+	}
+
+	for _, component := range internalComponents {
+		if name == component {
+			return true
+		}
+	}
+	return false
 }
 
 // Stop 停止Agent应用

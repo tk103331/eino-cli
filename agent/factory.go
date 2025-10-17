@@ -22,7 +22,7 @@ func (f *Factory) CreateAgent(name string) (Agent, error) {
 	if !ok {
 		return nil, fmt.Errorf("Agent配置不存在: %s", name)
 	}
-	
+
 	// 创建ReactAgent
 	agent := NewReactAgent(name, &agentCfg)
 	return agent, nil

@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino-ext/components/tool/wikipedia"
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/tk103331/eino-cli/config"
 )
 
@@ -15,11 +15,11 @@ func NewWikipediaTool(name string, cfg config.Tool) (tool.InvokableTool, error) 
 
 	// 创建默认配置
 	wikiConfig := &wikipedia.Config{
-		Language:     "zh",              // 默认中文
-		TopK:         5,                 // 默认返回5个结果
-		DocMaxChars:  500,               // 默认摘要最大长度
-		Timeout:      15 * time.Second,  // 默认超时时间
-		MaxRedirect:  3,                 // 默认最大重定向次数
+		Language:    "zh",             // 默认中文
+		TopK:        5,                // 默认返回5个结果
+		DocMaxChars: 500,              // 默认摘要最大长度
+		Timeout:     15 * time.Second, // 默认超时时间
+		MaxRedirect: 3,                // 默认最大重定向次数
 	}
 
 	// 从配置中读取参数

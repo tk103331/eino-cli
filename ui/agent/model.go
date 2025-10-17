@@ -46,6 +46,7 @@ type ViewModel struct {
 // 消息类型定义
 type ResponseMsg string
 type StreamChunkMsg string
+type StreamEndMsg struct{}
 type ErrorMsg string
 type ToolStartMsg struct {
 	Name      string
@@ -57,14 +58,13 @@ type ToolEndMsg struct {
 }
 
 // NewViewModel 创建新的ViewModel
-func NewViewModel(onSendMsg func(string) error) ViewModel {
-	// 创建markdown渲染器
+func NewViewModel(onSendMsg func(string) error) *ViewModel {
+	// 创建glamour渲染器 - 与chat界面相同
 	renderer, _ := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(80),
 	)
 
-	return ViewModel{
+	return &ViewModel{
 		messages:  []Message{},
 		onSendMsg: onSendMsg,
 		renderer:  renderer,
@@ -73,7 +73,7 @@ func NewViewModel(onSendMsg func(string) error) ViewModel {
 
 // Init 初始化模型
 func (m ViewModel) Init() tea.Cmd {
-	return nil
+	return nil // 与chat界面相同，不需要初始化命令
 }
 
 // Update 处理消息
@@ -85,33 +85,29 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.isWaiting {
+			// 等待响应时只允许退出
+			switch msg.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
 			return m, tea.Quit
 		case "up":
-			// 向上滚动
 			if m.scrollOffset > 0 {
 				m.scrollOffset--
 			}
 			return m, nil
 		case "down":
-			// 向下滚动
-			messageHeight := m.height - 6
-			messageLines := []string{}
-			for _, msg := range m.messages {
-				messageLines = append(messageLines, m.renderMessage(msg)...)
+			maxViewport := len(m.messages) - (m.height - 4)
+			if maxViewport < 0 {
+				maxViewport = 0
 			}
-			if m.streamingContent != "" {
-				streamMsg := Message{
-					Type:    AssistantMessage,
-					Content: m.streamingContent,
-				}
-				messageLines = append(messageLines, m.renderMessage(streamMsg)...)
-			}
-			
-			totalLines := len(messageLines)
-			maxOffset := totalLines - messageHeight
-			if maxOffset > 0 && m.scrollOffset < maxOffset {
+			if m.scrollOffset < maxViewport {
 				m.scrollOffset++
 			}
 			return m, nil
@@ -167,197 +163,175 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.streamingContent += string(msg)
 		return m, nil
 
+	case StreamEndMsg:
+		// 流式结束，将流式内容转换为正式消息
+		if m.streamingContent != "" {
+			m.messages = append(m.messages, Message{
+				Type:    AssistantMessage,
+				Content: m.streamingContent,
+			})
+			m.streamingContent = ""
+		}
+		m.isWaiting = false
+		return m, nil
+
 	case ToolStartMsg:
 		// 工具开始执行
+		content := fmt.Sprintf("Calling tool: %s", msg.Name)
+		if msg.Arguments != "" && msg.Arguments != "{}" {
+			content += fmt.Sprintf("\nArguments: %s", msg.Arguments)
+		}
 		m.messages = append(m.messages, Message{
 			Type:    ToolStartMessage,
-			Content: fmt.Sprintf("🔧 调用工具: %s\n参数: %s", msg.Name, msg.Arguments),
+			Content: content,
 			Name:    msg.Name,
 		})
 		return m, nil
 
 	case ToolEndMsg:
 		// 工具执行结束
+		content := fmt.Sprintf("Tool %s completed", msg.Name)
+		if msg.Result != "" {
+			// 清理结果，移除多余的换行符
+			result := strings.TrimSpace(msg.Result)
+			if len(result) > 200 {
+				// 如果结果太长，截断并添加省略号
+				result = result[:197] + "..."
+			}
+			content += fmt.Sprintf("\nResult: %s", result)
+		}
 		m.messages = append(m.messages, Message{
 			Type:    ToolEndMessage,
-			Content: fmt.Sprintf("✅ 工具 %s 执行结果:\n%s", msg.Name, msg.Result),
+			Content: content,
 			Name:    msg.Name,
 		})
 		return m, nil
 
 	case ErrorMsg:
-		// 错误消息
+		// 错误消息 - 直接显示所有错误消息（过滤已在应用层处理）
+		errorText := string(msg)
 		m.messages = append(m.messages, Message{
 			Type:    ErrorMessage,
-			Content: string(msg),
+			Content: errorText,
 		})
 		m.isWaiting = false
 		m.streamingContent = ""
-		m.errorMsg = string(msg)
+		m.errorMsg = errorText
 		return m, nil
 	}
 
 	return m, nil
 }
 
-// View 渲染视图
+// View 渲染界面
 func (m ViewModel) View() string {
-	if m.width == 0 || m.height == 0 {
-		return "正在初始化..."
-	}
+	// 样式定义 - 完全参考chat界面
+	userStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#00ff00")).
+		Bold(true)
 
-	var b strings.Builder
+	assistantStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#0099ff")).
+		Bold(true)
 
-	// 标题
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("205")).
-		Render("🤖 AI Agent 对话")
-	b.WriteString(title + "\n\n")
+	toolStartStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#ffaa00")).
+		Bold(true)
 
-	// 消息区域高度
-	messageHeight := m.height - 6 // 留出空间给标题、输入框和提示
+	toolEndStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#00aa00")).
+		Bold(true)
 
-	// 渲染消息
-	messageLines := []string{}
-	for _, msg := range m.messages {
-		messageLines = append(messageLines, m.renderMessage(msg)...)
-	}
+	errorStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#ff0000")).
+		Bold(true)
 
-	// 如果有流式内容，添加到消息中
-	if m.streamingContent != "" {
-		streamMsg := Message{
-			Type:    AssistantMessage,
-			Content: m.streamingContent,
-		}
-		messageLines = append(messageLines, m.renderMessage(streamMsg)...)
-	}
-
-	// 计算需要显示的消息行
-	totalLines := len(messageLines)
-	startLine := m.scrollOffset
-	
-	// 如果没有足够的消息行来填充屏幕，自动滚动到底部
-	if totalLines <= messageHeight {
-		startLine = 0
-		m.scrollOffset = 0
-	} else {
-		// 确保滚动偏移量在有效范围内
-		maxOffset := totalLines - messageHeight
-		if m.scrollOffset > maxOffset {
-			m.scrollOffset = maxOffset
-			startLine = maxOffset
-		}
-		
-		// 如果有新消息且当前在底部附近，自动滚动到底部
-		if m.scrollOffset >= maxOffset-2 {
-			m.scrollOffset = maxOffset
-			startLine = maxOffset
-		}
-	}
-
-	// 显示消息
-	for i := startLine; i < totalLines && i-startLine < messageHeight; i++ {
-		b.WriteString(messageLines[i] + "\n")
-	}
-
-	// 填充空行
-	for i := len(messageLines) - startLine; i < messageHeight; i++ {
-		b.WriteString("\n")
-	}
-
-	// 分隔线
-	separator := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
-		Render(strings.Repeat("─", m.width))
-	b.WriteString(separator + "\n")
-
-	// 输入框
 	inputStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("62")).
-		Padding(0, 1)
+		BorderForeground(lipgloss.Color("#666666")).
+		Padding(0, 1).
+		Width(m.width - 4) // 减去边框和内边距的宽度
 
-	prompt := "💬 输入消息: "
-	if m.isWaiting {
-		prompt = "⏳ 等待响应... "
-		inputStyle = inputStyle.BorderForeground(lipgloss.Color("214"))
+	// 构建消息显示区域
+	var messageLines []string
+	messageLines = append(messageLines, "=== Eino CLI Agent ===")
+	messageLines = append(messageLines, "")
+
+	// 显示消息历史 - 使用滚动逻辑
+	visibleMessages := m.messages
+	if m.scrollOffset > 0 && m.scrollOffset < len(m.messages) {
+		visibleMessages = m.messages[m.scrollOffset:]
 	}
 
-	input := inputStyle.Render(prompt + m.input + "█")
-	b.WriteString(input + "\n")
+	for _, msg := range visibleMessages {
+		switch msg.Type {
+		case UserMessage:
+			messageLines = append(messageLines, userStyle.Render("You: ")+msg.Content)
+		case AssistantMessage:
+			// 对AI回复使用markdown渲染
+			renderedContent := m.renderMarkdown(msg.Content)
+			messageLines = append(messageLines, assistantStyle.Render("AI: ")+renderedContent)
+		case ToolStartMessage:
+			messageLines = append(messageLines, toolStartStyle.Render(msg.Content))
+		case ToolEndMessage:
+			messageLines = append(messageLines, toolEndStyle.Render(msg.Content))
+		case ErrorMessage:
+			messageLines = append(messageLines, errorStyle.Render("Error: ")+msg.Content)
+		}
+		messageLines = append(messageLines, "")
+	}
 
-	// 帮助信息
-	help := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
-		Render("按 Enter 发送消息，按 ↑↓ 滚动消息，按 Ctrl+C 或 q 退出")
-	b.WriteString(help)
+	// 显示正在流式接收的内容
+	if m.streamingContent != "" {
+		// 对流式内容也使用markdown渲染
+		renderedStreamContent := m.renderMarkdown(m.streamingContent)
+		messageLines = append(messageLines, assistantStyle.Render("AI: ")+renderedStreamContent)
+		messageLines = append(messageLines, "")
+	}
 
-	return b.String()
+	// 显示等待状态
+	if m.isWaiting {
+		messageLines = append(messageLines, "AI is thinking...")
+		messageLines = append(messageLines, "")
+	}
+
+	// 显示错误信息
+	if m.errorMsg != "" {
+		messageLines = append(messageLines, errorStyle.Render("Error: "+m.errorMsg))
+		messageLines = append(messageLines, "")
+	}
+
+	// 限制显示的行数
+	maxLines := m.height - 4 // 为输入框和边框留出空间
+	if maxLines > 0 && len(messageLines) > maxLines {
+		messageLines = messageLines[len(messageLines)-maxLines:]
+	}
+
+	messageArea := strings.Join(messageLines, "\n")
+
+	// 构建输入区域
+	inputPrompt := "> "
+	if m.isWaiting {
+		inputPrompt = "Waiting for response... "
+	}
+	inputArea := inputStyle.Render(inputPrompt + m.input)
+
+	// 构建帮助信息
+	helpText := "Press Ctrl+C to quit, ↑/↓ to scroll, Enter to send"
+
+	return fmt.Sprintf("%s\n\n%s\n%s", messageArea, inputArea, helpText)
 }
 
-// renderMessage 渲染单条消息
-func (m ViewModel) renderMessage(msg Message) []string {
-	var lines []string
-	var style lipgloss.Style
-
-	switch msg.Type {
-	case UserMessage:
-		style = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("39")).
-			Bold(true)
-		prefix := "👤 用户: "
-		content := style.Render(prefix) + msg.Content
-		lines = append(lines, content)
-
-	case AssistantMessage:
-		style = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("86"))
-		prefix := "🤖 助手: "
-
-		// 尝试渲染markdown
-		rendered := msg.Content
-		if m.renderer != nil {
-			if markdownContent, err := m.renderer.Render(msg.Content); err == nil {
-				rendered = strings.TrimSpace(markdownContent)
-			}
-		}
-
-		// 分割成多行
-		contentLines := strings.Split(rendered, "\n")
-		for i, line := range contentLines {
-			if i == 0 {
-				lines = append(lines, style.Render(prefix)+line)
-			} else {
-				lines = append(lines, "     "+line) // 缩进对齐
-			}
-		}
-
-	case ToolStartMessage:
-		style = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214")).
-			Bold(true)
-		lines = append(lines, style.Render(msg.Content))
-
-	case ToolEndMessage:
-		style = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("46"))
-		// 分割成多行
-		contentLines := strings.Split(msg.Content, "\n")
-		for _, line := range contentLines {
-			lines = append(lines, style.Render(line))
-		}
-
-	case ErrorMessage:
-		style = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			Bold(true)
-		prefix := "❌ 错误: "
-		lines = append(lines, style.Render(prefix+msg.Content))
+// renderMarkdown 渲染markdown内容 - 与chat界面相同
+func (m *ViewModel) renderMarkdown(content string) string {
+	if m.renderer == nil {
+		return content // 如果渲染器未初始化，返回原始内容
 	}
 
-	// 添加空行分隔
-	lines = append(lines, "")
+	rendered, err := m.renderer.Render(content)
+	if err != nil {
+		return content // 如果渲染失败，返回原始内容
+	}
 
-	return lines
+	return strings.TrimSpace(rendered)
 }

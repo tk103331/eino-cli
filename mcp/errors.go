@@ -9,16 +9,16 @@ import (
 var (
 	// ErrMCPNotInitialized MCP管理器未初始化
 	ErrMCPNotInitialized = errors.New("MCP管理器未初始化")
-	
+
 	// ErrServerNotFound MCP服务器未找到
 	ErrServerNotFound = errors.New("MCP服务器未找到")
-	
+
 	// ErrToolNotFound MCP工具未找到
 	ErrToolNotFound = errors.New("MCP工具未找到")
-	
+
 	// ErrInvalidConfig 无效的MCP配置
 	ErrInvalidConfig = errors.New("无效的MCP配置")
-	
+
 	// ErrConnectionFailed MCP连接失败
 	ErrConnectionFailed = errors.New("MCP连接失败")
 )

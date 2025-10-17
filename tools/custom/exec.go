@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -181,7 +182,7 @@ func (e *ExecTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 		if stdout.Len() > 0 {
 			errorMsg += fmt.Sprintf("\nstdout: %s", stdout.String())
 		}
-		return "", fmt.Errorf(errorMsg)
+		return "", errors.New(errorMsg)
 	}
 
 	// 返回标准输出

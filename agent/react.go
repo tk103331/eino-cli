@@ -34,11 +34,14 @@ type ToolCallCallback struct {
 
 // OnStart 节点开始时的回调
 func (t *ToolCallCallback) OnStart(ctx context.Context, info *callbacks.RunInfo, input callbacks.CallbackInput) context.Context {
-	if t.callback != nil && info.Type == "tool" {
-		t.callback(map[string]interface{}{
-			"type":      "tool_start",
-			"tool_name": info.Name,
-			"input":     input,
+	if t.callback != nil && info.Name != "" {
+		// 发送工具开始调用信息
+		t.callback(struct {
+			Name      string
+			Arguments string
+		}{
+			Name:      info.Name,
+			Arguments: fmt.Sprintf("%v", input),
 		})
 	}
 	return ctx
@@ -46,11 +49,14 @@ func (t *ToolCallCallback) OnStart(ctx context.Context, info *callbacks.RunInfo,
 
 // OnEnd 节点结束时的回调
 func (t *ToolCallCallback) OnEnd(ctx context.Context, info *callbacks.RunInfo, output callbacks.CallbackOutput) context.Context {
-	if t.callback != nil && info.Type == "tool" {
-		t.callback(map[string]interface{}{
-			"type":      "tool_end",
-			"tool_name": info.Name,
-			"output":    output,
+	if t.callback != nil && info.Name != "" {
+		// 发送工具执行完成信息
+		t.callback(struct {
+			Name   string
+			Result string
+		}{
+			Name:   info.Name,
+			Result: fmt.Sprintf("%v", output),
 		})
 	}
 	return ctx
@@ -58,12 +64,9 @@ func (t *ToolCallCallback) OnEnd(ctx context.Context, info *callbacks.RunInfo, o
 
 // OnError 节点出错时的回调
 func (t *ToolCallCallback) OnError(ctx context.Context, info *callbacks.RunInfo, err error) context.Context {
-	if t.callback != nil && info.Type == "tool" {
-		t.callback(map[string]interface{}{
-			"type":      "tool_error",
-			"tool_name": info.Name,
-			"error":     err.Error(),
-		})
+	if t.callback != nil && info.Name != "" {
+		// 任何有名称的节点错误都发送回调
+		t.callback(fmt.Sprintf("工具 %s 执行错误: %v", info.Name, err))
 	}
 	return ctx
 }
@@ -138,11 +141,10 @@ func (r *ReactAgent) Run(prompt string) error {
 		return fmt.Errorf("运行Agent失败: %w", err)
 	}
 
-	// 打印响应内容
 	if response.Content != "" {
 		fmt.Print(response.Content)
 	}
-	fmt.Println() // 添加换行
+	fmt.Println()
 	return nil
 }
 
@@ -223,6 +225,81 @@ func (r *ReactAgent) ChatWithCallback(ctx context.Context, prompt string, callba
 	}
 
 	return result.String(), nil
+}
+
+// ChatStream 进行流式对话，通过chunk回调处理流式输出
+func (r *ReactAgent) ChatStream(ctx context.Context, prompt string, chunkCallback func(*StreamChunk), toolCallback func(interface{})) error {
+	if r.agent == nil {
+		if err := r.Init(); err != nil {
+			return err
+		}
+	}
+
+	// 创建消息
+	messages := []*schema.Message{
+		schema.SystemMessage(r.config.System),
+		schema.UserMessage(prompt),
+	}
+
+	// 创建工具调用回调处理器
+	var toolCallCallback *ToolCallCallback
+	if toolCallback != nil {
+		toolCallCallback = &ToolCallCallback{callback: toolCallback}
+	}
+
+	// 使用Stream方法进行流式调用
+	var sr *schema.StreamReader[*schema.Message]
+	var err error
+
+	if toolCallCallback != nil {
+		sr, err = r.agent.Stream(ctx, messages, agent.WithComposeOptions(compose.WithCallbacks(toolCallCallback)))
+	} else {
+		sr, err = r.agent.Stream(ctx, messages)
+	}
+	if err != nil {
+		if chunkCallback != nil {
+			chunkCallback(&StreamChunk{
+				Type:    "error",
+				Content: fmt.Sprintf("Stream失败: %v", err),
+			})
+		}
+		return fmt.Errorf("Stream失败: %w", err)
+	}
+	defer sr.Close()
+
+	// 读取流式响应
+	for {
+		msg, err := sr.Recv()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				// 流结束，发送结束标记
+				if chunkCallback != nil {
+					chunkCallback(&StreamChunk{
+						Type:    "content",
+						Content: "",
+					})
+				}
+				break
+			}
+			if chunkCallback != nil {
+				chunkCallback(&StreamChunk{
+					Type:    "error",
+					Content: fmt.Sprintf("接收流消息失败: %v", err),
+				})
+			}
+			return fmt.Errorf("接收流消息失败: %w", err)
+		}
+
+		// 发送内容块
+		if chunkCallback != nil && msg.Content != "" {
+			chunkCallback(&StreamChunk{
+				Type:    "content",
+				Content: msg.Content,
+			})
+		}
+	}
+
+	return nil
 }
 
 // createModel 创建模型

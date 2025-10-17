@@ -65,7 +65,7 @@ func (m *Manager) GetToolsForAgent(agentName string) ([]tool.InvokableTool, erro
 
 	// 获取指定服务器的工具
 	mcpTools := m.client.GetToolsForServers(serverNames)
-	
+
 	// 转换为工具列表
 	tools := make([]tool.InvokableTool, 0, len(mcpTools))
 	for _, mcpTool := range mcpTools {

@@ -3,8 +3,8 @@ package tools
 import (
 	"context"
 
-	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino-ext/components/tool/browseruse"
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/tk103331/eino-cli/config"
 )
 

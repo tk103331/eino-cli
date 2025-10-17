@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/cloudwego/eino/components/tool"
 	getTool "github.com/cloudwego/eino-ext/components/tool/httprequest/get"
 	postTool "github.com/cloudwego/eino-ext/components/tool/httprequest/post"
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/tk103331/eino-cli/config"
 )
 
@@ -42,7 +42,7 @@ func NewHTTPRequestTool(name string, cfg config.Tool) (tool.InvokableTool, error
 
 	// 创建HTTP客户端
 	httpClient := &http.Client{
-		Timeout: timeout,
+		Timeout:   timeout,
 		Transport: &http.Transport{},
 	}
 
