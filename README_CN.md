@@ -5,7 +5,7 @@ Eino CLI 是一个基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框
 ## 功能特点
 
 - **智能 Agent 系统**：基于 ReAct 模式的 AI Agent，支持工具调用和推理
-- **交互式聊天界面**：基于 TUI 的聊天界面，可与 AI 模型进行实时对话
+- **交互式聊天界面**：基于 TUI 的聊天界面，可与 AI 模型和agents进行实时对话
 - **丰富的工具生态**：内置多种工具，包括搜索、浏览器、命令行、HTTP 请求等
 - **多模型提供商支持**：支持 OpenAI、Claude、Gemini、Qwen、DeepSeek、Ollama、百度千帆、字节跳动豆包等
 - **灵活的配置系统**：通过 YAML 配置文件管理 Agent、工具、模型和聊天预设
@@ -42,25 +42,29 @@ cp config.yml.example config.yml
 - `mcp_servers`: MCP 服务器配置
 - `settings`: 全局设置，包括 Langfuse 配置
 
-### 2. 交互式聊天模式
+### 2. 交互式Agent/聊天模式
 
-启动与模型的交互式聊天会话：
+启动与agent或模型的交互式会话：
 
 ```bash
+# 启动交互式agent会话
+eino-cli agent --agent search_agent
+
 # 与指定模型聊天
-eino-cli chat --model gpt4
+eino-cli agent --model gpt4
 
 # 使用工具聊天
-eino-cli chat --model gpt4 --tools duckduckgo_search,wikipedia_search
+eino-cli agent --model gpt4 --tools duckduckgo_search,wikipedia_search
 
 # 使用聊天预设
-eino-cli chat --chat my_preset
+eino-cli agent --chat search_chat
 ```
 
 参数说明：
-- `--chat, -c`: 指定配置文件中的聊天预设名称
-- `--model, -m`: 指定要聊天的模型（未使用 --chat 时必需）
-- `--tools, -t`: 指定可用工具，多个工具用逗号分隔（未使用 --chat 时可选）
+- `--agent, -a`: 指定要运行的agent名称（可选）
+- `--chat, -c`: 指定配置文件中的聊天预设名称（可选）
+- `--model, -m`: 指定要聊天的模型（未使用--agent或--chat时必需）
+- `--tools, -t`: 指定可用工具，多个工具用逗号分隔（直接使用--model时可选）
 
 ### 3. 运行 Agent
 

@@ -65,9 +65,10 @@ func NewViewModel(onSendMsg func(string) error) *ViewModel {
 	)
 
 	return &ViewModel{
-		messages:  []Message{},
-		onSendMsg: onSendMsg,
-		renderer:  renderer,
+		messages:     []Message{},
+		onSendMsg:    onSendMsg,
+		renderer:     renderer,
+		scrollOffset: 0,
 	}
 }
 

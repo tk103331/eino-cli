@@ -5,7 +5,7 @@ Eino CLI is an intelligent AI Agent command-line tool based on the [CloudWeGo Ei
 ## Features
 
 - **Intelligent Agent System**: AI Agent based on ReAct pattern with tool calling and reasoning capabilities
-- **Interactive Chat Interface**: TUI-based chat interface for real-time conversations with AI models
+- **Interactive Chat Interface**: TUI-based chat interface for real-time conversations with AI models and agents
 - **Rich Tool Ecosystem**: Built-in various tools including search, browser, command line, HTTP requests, etc.
 - **Multi-Model Provider Support**: Supports OpenAI, Claude, Gemini, Qwen, DeepSeek, Ollama, Baidu Qianfan, ByteDance Doubao, and more
 - **Flexible Configuration System**: Manage Agents, tools, models, and chat presets through YAML configuration files
@@ -42,25 +42,29 @@ The configuration file contains the following main sections:
 - `mcp_servers`: MCP server configuration
 - `settings`: Global settings including Langfuse configuration
 
-### 2. Interactive Chat Mode
+### 2. Interactive Agent/Chat Mode
 
-Start an interactive chat session with a model:
+Start an interactive session with an agent or model:
 
 ```bash
+# Start an interactive agent session
+eino-cli agent --agent search_agent
+
 # Chat with a specific model
-eino-cli chat --model gpt4
+eino-cli agent --model gpt4
 
 # Chat with tools
-eino-cli chat --model gpt4 --tools duckduckgo_search,wikipedia_search
+eino-cli agent --model gpt4 --tools duckduckgo_search,wikipedia_search
 
 # Use a chat preset
-eino-cli chat --chat my_preset
+eino-cli agent --chat search_chat
 ```
 
 Parameter description:
-- `--chat, -c`: Specify a chat preset name from configuration file
-- `--model, -m`: Specify the model to chat with (required when not using --chat)
-- `--tools, -t`: Specify available tools, separated by commas (optional when not using --chat)
+- `--agent, -a`: Specify the agent name to run (optional)
+- `--chat, -c`: Specify a chat preset name from configuration file (optional)
+- `--model, -m`: Specify the model to chat with (required when not using --agent or --chat)
+- `--tools, -t`: Specify available tools, separated by commas (optional when using --model directly)
 
 ### 3. Running an Agent
 
