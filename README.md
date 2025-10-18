@@ -1,17 +1,17 @@
-# Eino CLI
-
-English | [中文](README_CN.md)
+English
 
 Eino CLI is an intelligent AI Agent command-line tool based on the [CloudWeGo Eino](https://github.com/cloudwego/eino) framework. It provides a powerful Agent system with support for multiple tool integrations and various AI model providers, enabling you to easily build and run custom AI Agents.
 
 ## Features
 
 - **Intelligent Agent System**: AI Agent based on ReAct pattern with tool calling and reasoning capabilities
+- **Interactive Chat Interface**: TUI-based chat interface for real-time conversations with AI models
 - **Rich Tool Ecosystem**: Built-in various tools including search, browser, command line, HTTP requests, etc.
-- **Multi-Model Provider Support**: Supports OpenAI, Claude, Gemini, Qwen, DeepSeek, Ollama, and more
-- **Flexible Configuration System**: Manage Agents, tools, and models through YAML configuration files
+- **Multi-Model Provider Support**: Supports OpenAI, Claude, Gemini, Qwen, DeepSeek, Ollama, Baidu Qianfan, ByteDance Doubao, and more
+- **Flexible Configuration System**: Manage Agents, tools, models, and chat presets through YAML configuration files
 - **Custom Tool Support**: Supports custom HTTP and command-line tools
-- **MCP Server Integration**: Supports Model Context Protocol servers
+- **MCP Server Integration**: Supports Model Context Protocol (MCP) servers with both SSE and STDIO transport
+- **Langfuse Integration**: Built-in observability with Langfuse for monitoring and tracing
 
 ## Installation
 
@@ -37,10 +37,32 @@ The configuration file contains the following main sections:
 - `providers`: AI model provider configuration (API keys, base URLs, etc.)
 - `models`: Model configuration (temperature, max tokens, etc.)
 - `agents`: Agent configuration (system prompts, models and tools to use)
+- `chats`: Chat preset configuration for interactive chat mode
 - `tools`: Tool configuration (parameters and settings for custom tools)
 - `mcp_servers`: MCP server configuration
+- `settings`: Global settings including Langfuse configuration
 
-### 2. Running an Agent
+### 2. Interactive Chat Mode
+
+Start an interactive chat session with a model:
+
+```bash
+# Chat with a specific model
+eino-cli chat --model gpt4
+
+# Chat with tools
+eino-cli chat --model gpt4 --tools duckduckgo_search,wikipedia_search
+
+# Use a chat preset
+eino-cli chat --chat my_preset
+```
+
+Parameter description:
+- `--chat, -c`: Specify a chat preset name from configuration file
+- `--model, -m`: Specify the model to chat with (required when not using --chat)
+- `--tools, -t`: Specify available tools, separated by commas (optional when not using --chat)
+
+### 3. Running an Agent
 
 Use the `run` command to run a specified Agent:
 
@@ -51,9 +73,9 @@ eino-cli run --agent test_agent --prompt "Hello, please help me search for today
 Parameter description:
 - `--agent, -a`: Specify the Agent name to run (required)
 - `--prompt, -p`: Specify the input prompt for the Agent (required)
-- `--config`: Specify the configuration file path (optional, defaults to config.yml)
+- `--config`: Specify the configuration file path (optional, defaults to ~/.eino-cli/config.yml)
 
-### 3. Configuration Example
+### 4. Configuration Example
 
 Here's a complete configuration example:
 
@@ -64,6 +86,9 @@ providers:
     type: openai
     base_url: https://api.openai.com/v1
     api_key: sk-xxxxx
+  claude:
+    type: claude
+    api_key: sk-ant-xxxxx
 
 # Model configuration
 models:
@@ -72,6 +97,26 @@ models:
     model: gpt-4
     max_tokens: 4096
     temperature: 0.7
+  claude_sonnet:
+    provider: claude
+    model: claude-3-5-sonnet-20241022
+    max_tokens: 4096
+    temperature: 0.7
+
+# Chat preset configuration
+chats:
+  search_chat:
+    model: gpt4
+    system: "You are a helpful search assistant. Use search tools to find information for users."
+    tools:
+      - duckduckgo_search
+      - wikipedia_search
+  coding_chat:
+    model: claude_sonnet
+    system: "You are an expert programmer helping with coding tasks."
+    tools:
+      - commandline
+      - http_request
 
 # MCP server configuration
 mcp_servers:
@@ -83,7 +128,6 @@ mcp_servers:
       headers:
         "Content-Type": "application/json"
         "Authorization": "Bearer your-token"  # Optional authentication header
-  
   # STDIO type MCP server
   stdio_server:
     type: stdio
@@ -106,7 +150,6 @@ agents:
       - wikipedia_search
     mcp_servers:                        # MCP servers that the Agent can use
       - sse_server
-  
   # Multi-functional assistant example (including custom tools and MCP servers)
   multi_agent:
     system: "You are a multi-functional assistant that can search information, query weather, get system information, etc."
@@ -128,7 +171,6 @@ tools:
       region: "wt"           # Search region: wt(global), cn(China), us(USA), uk(UK)
       safe_search: "off"     # Safe search: off(disabled), moderate(moderate), strict(strict)
       timeout: 10            # Timeout in seconds, default 10 seconds
-  
   # Custom HTTP tool example
   weather_api:
     type: customhttp
@@ -143,7 +185,6 @@ tools:
         type: "string"
         description: "City name"
         required: true
-  
   # Custom command-line tool example
   system_info:
     type: customexec
@@ -153,6 +194,13 @@ tools:
       dir: "/tmp"
       timeout: 30
     params: []
+
+# Global settings
+settings:
+  langfuse:
+    host: https://cloud.langfuse.com
+    public_key: pk-xxx
+    secret_key: sk-xxx
 ```
 
 ## Supported Tools
@@ -192,6 +240,7 @@ Eino CLI comes with various built-in tools that can be used in Agents:
 
 - [CloudWeGo Eino](https://github.com/cloudwego/eino) - AI application development framework
 - [Cobra](https://github.com/spf13/cobra) - Command-line interface framework
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea) - TUI framework for interactive chat
 - Various Eino extension components (models and tools)
 
 ## License

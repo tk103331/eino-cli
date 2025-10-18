@@ -1,5 +1,3 @@
-# Eino CLI
-
 [English](README.md) | 中文
 
 Eino CLI 是一个基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框架的智能 AI Agent 命令行工具。它提供了强大的 Agent 系统，支持多种工具集成和多个 AI 模型提供商，让您能够轻松构建和运行自定义的 AI Agent。
@@ -7,11 +5,13 @@ Eino CLI 是一个基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框
 ## 功能特点
 
 - **智能 Agent 系统**：基于 ReAct 模式的 AI Agent，支持工具调用和推理
+- **交互式聊天界面**：基于 TUI 的聊天界面，可与 AI 模型进行实时对话
 - **丰富的工具生态**：内置多种工具，包括搜索、浏览器、命令行、HTTP 请求等
-- **多模型提供商支持**：支持 OpenAI、Claude、Gemini、Qwen、DeepSeek、Ollama 等
-- **灵活的配置系统**：通过 YAML 配置文件管理 Agent、工具和模型
+- **多模型提供商支持**：支持 OpenAI、Claude、Gemini、Qwen、DeepSeek、Ollama、百度千帆、字节跳动豆包等
+- **灵活的配置系统**：通过 YAML 配置文件管理 Agent、工具、模型和聊天预设
 - **自定义工具支持**：支持自定义 HTTP 和命令行工具
-- **MCP 服务器集成**：支持 Model Context Protocol 服务器
+- **MCP 服务器集成**：支持 Model Context Protocol (MCP) 服务器，包括 SSE 和 STDIO 传输
+- **Langfuse 集成**：内置 Langfuse 可观测性支持，用于监控和追踪
 
 ## 安装
 
@@ -37,10 +37,32 @@ cp config.yml.example config.yml
 - `providers`: AI 模型提供商配置（API 密钥、基础 URL 等）
 - `models`: 模型配置（温度、最大 token 数等）
 - `agents`: Agent 配置（系统提示、使用的模型和工具）
+- `chats`: 聊天预设配置，用于交互式聊天模式
 - `tools`: 工具配置（自定义工具的参数和配置）
 - `mcp_servers`: MCP 服务器配置
+- `settings`: 全局设置，包括 Langfuse 配置
 
-### 2. 运行 Agent
+### 2. 交互式聊天模式
+
+启动与模型的交互式聊天会话：
+
+```bash
+# 与指定模型聊天
+eino-cli chat --model gpt4
+
+# 使用工具聊天
+eino-cli chat --model gpt4 --tools duckduckgo_search,wikipedia_search
+
+# 使用聊天预设
+eino-cli chat --chat my_preset
+```
+
+参数说明：
+- `--chat, -c`: 指定配置文件中的聊天预设名称
+- `--model, -m`: 指定要聊天的模型（未使用 --chat 时必需）
+- `--tools, -t`: 指定可用工具，多个工具用逗号分隔（未使用 --chat 时可选）
+
+### 3. 运行 Agent
 
 使用 `run` 命令运行指定的 Agent：
 
@@ -51,9 +73,9 @@ eino-cli run --agent test_agent --prompt "你好，请帮我搜索一下今天�
 参数说明：
 - `--agent, -a`: 指定要运行的 Agent 名称（必需）
 - `--prompt, -p`: 指定 Agent 的输入提示（必需）
-- `--config`: 指定配置文件路径（可选，默认为 config.yml）
+- `--config`: 指定配置文件路径（可选，默认为 ~/.eino-cli/config.yml）
 
-### 3. 配置示例
+### 4. 配置示例
 
 以下是一个完整的配置示例：
 
@@ -64,6 +86,9 @@ providers:
     type: openai
     base_url: https://api.openai.com/v1
     api_key: sk-xxxxx
+  claude:
+    type: claude
+    api_key: sk-ant-xxxxx
 
 # 模型配置
 models:
@@ -72,6 +97,26 @@ models:
     model: gpt-4
     max_tokens: 4096
     temperature: 0.7
+  claude_sonnet:
+    provider: claude
+    model: claude-3-5-sonnet-20241022
+    max_tokens: 4096
+    temperature: 0.7
+
+# 聊天预设配置
+chats:
+  search_chat:
+    model: gpt4
+    system: "你是一个有用的搜索助手。使用搜索工具为用户查找信息。"
+    tools:
+      - duckduckgo_search
+      - wikipedia_search
+  coding_chat:
+    model: claude_sonnet
+    system: "你是一个专业的程序员，帮助用户完成编程任务。"
+    tools:
+      - commandline
+      - http_request
 
 # MCP 服务器配置
 mcp_servers:
@@ -83,7 +128,6 @@ mcp_servers:
       headers:
         "Content-Type": "application/json"
         "Authorization": "Bearer your-token"  # 可选的认证头
-  
   # STDIO 类型的 MCP 服务器
   stdio_server:
     type: stdio
@@ -106,7 +150,6 @@ agents:
       - wikipedia_search
     mcp_servers:                        # Agent 可以使用的 MCP 服务器
       - sse_server
-  
   # 多功能助手示例（包含自定义工具和MCP服务器）
   multi_agent:
     system: "你是一个多功能助手，可以搜索信息、查询天气、获取系统信息等"
@@ -128,7 +171,6 @@ tools:
       region: "wt"           # 搜索区域：wt(全球)、cn(中国)、us(美国)、uk(英国)
       safe_search: "off"     # 安全搜索：off(关闭)、moderate(中等)、strict(严格)
       timeout: 10            # 超时时间（秒），默认10秒
-  
   # 自定义 HTTP 工具示例
   weather_api:
     type: customhttp
@@ -143,7 +185,6 @@ tools:
         type: "string"
         description: "城市名称"
         required: true
-  
   # 自定义命令行工具示例
   system_info:
     type: customexec
@@ -153,6 +194,13 @@ tools:
       dir: "/tmp"
       timeout: 30
     params: []
+
+# 全局设置
+settings:
+  langfuse:
+    host: https://cloud.langfuse.com
+    public_key: pk-xxx
+    secret_key: sk-xxx
 ```
 
 ## 支持的工具
@@ -192,6 +240,7 @@ Eino CLI 内置了多种工具，可以在 Agent 中使用：
 
 - [CloudWeGo Eino](https://github.com/cloudwego/eino) - AI 应用开发框架
 - [Cobra](https://github.com/spf13/cobra) - 命令行界面框架
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea) - 交互式聊天的 TUI 框架
 - 各种 Eino 扩展组件（模型和工具）
 
 ## 许可证
