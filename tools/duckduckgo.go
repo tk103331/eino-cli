@@ -10,16 +10,16 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// NewDuckDuckGoTool 创建DuckDuckGo搜索工具
+// NewDuckDuckGoTool creates DuckDuckGo search tool
 func NewDuckDuckGoTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
 	ctx := context.Background()
 
-	// 创建DuckDuckGo配置
+	// Create DuckDuckGo configuration
 	ddgConfig := &duckduckgo.Config{
 		ToolName:   name,
 		ToolDesc:   cfg.Description,
-		Region:     ddgsearch.RegionWT, // 默认全球
-		MaxResults: 10,                 // 默认返回10个结果
+		Region:     ddgsearch.RegionWT, // Default global
+		MaxResults: 10,                 // Default return 10 results
 		SafeSearch: ddgsearch.SafeSearchOff,
 		TimeRange:  ddgsearch.TimeRangeAll,
 		DDGConfig: &ddgsearch.Config{
@@ -29,7 +29,7 @@ func NewDuckDuckGoTool(name string, cfg config.Tool) (tool.InvokableTool, error)
 		},
 	}
 
-	// 从配置中读取自定义参数
+	// Read custom parameters from configuration
 	if maxResults, exists := cfg.Config["max_results"]; exists {
 		if val := maxResults.Int(); val > 0 {
 			ddgConfig.MaxResults = val
@@ -63,6 +63,6 @@ func NewDuckDuckGoTool(name string, cfg config.Tool) (tool.InvokableTool, error)
 		}
 	}
 
-	// 创建工具实例
+	// Create tool instance
 	return duckduckgo.NewTool(ctx, ddgConfig)
 }

@@ -21,26 +21,26 @@ var runCmd = &cobra.Command{
 		if cfg.Settings.Langfuse != nil {
 			handler, flusher := langfuse.NewLangfuseHandler(cfg.Settings.Langfuse)
 			defer flusher()
-			callbacks.AppendGlobalHandlers(handler) // 设置langfuse为全局callback
+			callbacks.AppendGlobalHandlers(handler) // Set langfuse as global callback
 		}
 
-		// 获取参数
+		// Get parameters
 		agentName, _ := cmd.Flags().GetString("agent")
 		prompt, _ := cmd.Flags().GetString("prompt")
 
-		// 创建Agent工厂
+		// Create Agent factory
 		factory := agent.NewFactory(cfg)
 
-		// 创建Agent
+		// Create Agent
 		agent, err := factory.CreateAgent(agentName)
 		if err != nil {
-			return fmt.Errorf("创建Agent失败: %w", err)
+			return fmt.Errorf("failed to create Agent: %w", err)
 		}
 
-		// 运行Agent
-		fmt.Printf("运行Agent: %s 使用提示词: %s\n", agentName, prompt)
+		// Run Agent
+		fmt.Printf("Running Agent: %s with prompt: %s\n", agentName, prompt)
 		if err := agent.Run(prompt); err != nil {
-			return fmt.Errorf("运行Agent失败: %w", err)
+			return fmt.Errorf("failed to run Agent: %w", err)
 		}
 
 		return nil
@@ -48,14 +48,14 @@ var runCmd = &cobra.Command{
 }
 
 func init() {
-	// 添加 run 子命令到根命令
+	// Add run subcommand to root command
 	RootCmd.AddCommand(runCmd)
 
-	// 为 run 子命令添加参数
-	runCmd.Flags().StringP("agent", "a", "", "指定要运行的Agent")
-	runCmd.Flags().StringP("prompt", "p", "", "指定Agent的提示词")
+	// Add parameters for run subcommand
+	runCmd.Flags().StringP("agent", "a", "", "Specify the Agent to run")
+	runCmd.Flags().StringP("prompt", "p", "", "Specify the prompt for Agent")
 
-	// 设置必需的参数
+	// Set required parameters
 	runCmd.MarkFlagRequired("agent")
 	runCmd.MarkFlagRequired("prompt")
 }

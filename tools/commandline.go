@@ -8,16 +8,16 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// NewCommandLineTool 创建命令行编辑器工具
+// NewCommandLineTool creates command line editor tool
 func NewCommandLineTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
 	ctx := context.Background()
 
-	// 创建编辑器配置
+	// Create editor configuration
 	editorConfig := &commandline.EditorConfig{
-		// 使用默认的操作器
-		Operator: nil, // 将使用默认实现
+		// Use default operator
+		Operator: nil, // Will use default implementation
 	}
 
-	// 创建工具实例
+	// Create tool instance
 	return commandline.NewStrReplaceEditor(ctx, editorConfig)
 }

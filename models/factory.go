@@ -8,31 +8,31 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// Factory 用于创建不同 provider 的 ChatModel
+// Factory is used to create ChatModel for different providers
 type Factory struct {
 	cfg *config.Config
 }
 
-// NewFactory 创建一个新的 Factory
+// NewFactory creates a new Factory
 func NewFactory(cfg *config.Config) *Factory {
 	return &Factory{cfg: cfg}
 }
 
-// CreateChatModel 根据模型名称创建对应的 ChatModel
+// CreateChatModel creates corresponding ChatModel based on model name
 func (f *Factory) CreateChatModel(ctx context.Context, modelName string) (model.ToolCallingChatModel, error) {
-	// 获取模型配置
+	// Get model configuration
 	modelCfg, ok := f.cfg.Models[modelName]
 	if !ok {
-		return nil, fmt.Errorf("模型配置不存在: %s", modelName)
+		return nil, fmt.Errorf("model configuration does not exist: %s", modelName)
 	}
 
-	// 获取提供商配置
+	// Get provider configuration
 	providerCfg, ok := f.cfg.Providers[modelCfg.Provider]
 	if !ok {
-		return nil, fmt.Errorf("提供商配置不存在: %s", modelCfg.Provider)
+		return nil, fmt.Errorf("provider configuration does not exist: %s", modelCfg.Provider)
 	}
 
-	// 根据提供商类型创建对应的模型
+	// Create corresponding model based on provider type
 	switch providerCfg.Type {
 	case "openai":
 		return f.createOpenAIModel(ctx, &modelCfg, &providerCfg)
@@ -51,6 +51,6 @@ func (f *Factory) CreateChatModel(ctx context.Context, modelName string) (model.
 	case "ollama":
 		return f.createOllamaModel(ctx, &modelCfg, &providerCfg)
 	default:
-		return nil, fmt.Errorf("不支持的提供商类型: %s", providerCfg.Type)
+		return nil, fmt.Errorf("unsupported provider type: %s", providerCfg.Type)
 	}
 }

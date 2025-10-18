@@ -6,8 +6,8 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// NewSequentialThinkingTool 创建顺序思考工具
+// NewSequentialThinkingTool creates sequential thinking tool
 func NewSequentialThinkingTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
-	// Sequential Thinking工具不需要特殊配置，直接创建
+	// Sequential Thinking tool doesn't need special configuration, create directly
 	return sequentialthinking.NewTool()
 }

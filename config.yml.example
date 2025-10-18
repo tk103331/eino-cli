@@ -1,11 +1,11 @@
-# 模型提供商配置
+# Model provider configuration
 providers:
   openai:
     type: openai
     base_url: https://api.openai.com/v1
     api_key: sk-xxxxx
 
-# 模型配置
+# Model configuration
 models:
   gpt4:
     provider: openai
@@ -13,58 +13,58 @@ models:
     max_tokens: 4096
     temperature: 0.7
 
-# 聊天预设配置
+# Chat preset configuration
 chats:
   search_chat:
     model: gpt4
-    system: "你是一个有用的搜索助手。使用搜索工具为用户查找信息。"
+    system: "You are a helpful search assistant. Use search tools to find information for users."
     tools:
       - duckduckgo_search
       - wikipedia_search
   coding_chat:
     model: gpt4
-    system: "你是一个专业的程序员，帮助用户完成编程任务。"
+    system: "You are a professional programmer who helps users complete programming tasks."
     tools:
       - commandline
       - http_request
 
-# MCP 服务器配置
+# MCP server configuration
 mcp_servers:
-  # SSE 类型的 MCP 服务器
+  # SSE type MCP server
   sse_server:
     type: mcp
     config:
-      url: "http://localhost:3000/mcp"  # MCP 服务器 URL
+      url: "http://localhost:3000/mcp"  # MCP server URL
       headers:
         "Content-Type": "application/json"
-        "Authorization": "Bearer your-token"  # 可选的认证头
+        "Authorization": "Bearer your-token"  # Optional authentication header
 
-  # STDIO 类型的 MCP 服务器
+  # STDIO type MCP server
   stdio_server:
     type: stdio
     config:
-      cmd: "python"                    # 要执行的命令
+      cmd: "python"                    # Command to execute
       args:
         - "-m"
-        - "your_mcp_server"             # MCP 服务器模块
+        - "your_mcp_server"             # MCP server module
       env:
-        "PYTHONPATH": "/path/to/server" # 环境变量
+        "PYTHONPATH": "/path/to/server" # Environment variable
         "API_KEY": "your-api-key"
 
-# Agent 配置
+# Agent configuration
 agents:
   search_agent:
-    system: "你是一个搜索助手，可以帮助用户搜索信息"
+    system: "You are a search assistant that can help users search for information"
     model: gpt4
     tools:
       - duckduckgo_search
       - wikipedia_search
-    mcp_servers:                        # Agent 可以使用的 MCP 服务器
+    mcp_servers:                        # MCP servers that can be used by the Agent
       - sse_server
 
-  # 多功能助手示例（包含自定义工具和MCP服务器）
+  # Multi-function assistant example (including custom tools and MCP servers)
   multi_agent:
-    system: "你是一个多功能助手，可以搜索信息、查询天气、获取系统信息等"
+    system: "You are a multi-function assistant that can search for information, query weather, get system information, etc."
     model: gpt4
     tools:
       - duckduckgo_search
@@ -74,20 +74,20 @@ agents:
       - sse_server
       - stdio_server
 
-# 工具配置
+# Tool configuration
 tools:
   duckduckgo_search:
     type: duckduckgo
     config:
-      max_results: 10        # 最大搜索结果数量，默认10
-      region: "wt"           # 搜索区域：wt(全球)、cn(中国)、us(美国)、uk(英国)
-      safe_search: "off"     # 安全搜索：off(关闭)、moderate(中等)、strict(严格)
-      timeout: 10            # 超时时间（秒），默认10秒
+      max_results: 10        # Maximum number of search results, default 10
+      region: "wt"           # Search region: wt(worldwide), cn(China), us(USA), uk(UK)
+      safe_search: "off"     # Safe search: off(off), moderate(moderate), strict(strict)
+      timeout: 10            # Timeout in seconds, default 10 seconds
 
-  # 自定义 HTTP 工具示例
+  # Custom HTTP tool example
   weather_api:
     type: customhttp
-    description: "获取天气信息的 API 工具"
+    description: "API tool for getting weather information"
     config:
       url: "https://api.openweathermap.org/data/2.5/weather?q={{city}}"
       method: "GET"
@@ -96,13 +96,13 @@ tools:
     params:
       - name: "city"
         type: "string"
-        description: "城市名称"
+        description: "City name"
         required: true
 
-  # 自定义命令行工具示例
+  # Custom command line tool example
   system_info:
     type: customexec
-    description: "获取系统信息"
+    description: "Get system information"
     config:
       cmd: "uname -a && df -h"
       dir: "/tmp"

@@ -22,73 +22,73 @@ var agentCmd = &cobra.Command{
 		if cfg.Settings.Langfuse != nil {
 			handler, flusher := langfuse.NewLangfuseHandler(cfg.Settings.Langfuse)
 			defer flusher()
-			callbacks.AppendGlobalHandlers(handler) // 设置langfuse为全局callback
+			callbacks.AppendGlobalHandlers(handler) // Set langfuse as global callback
 		}
 
-		// 获取参数
+		// Get parameters
 		agentName, _ := cmd.Flags().GetString("agent")
 		chatName, _ := cmd.Flags().GetString("chat")
 		modelName, _ := cmd.Flags().GetString("model")
 		toolsStr, _ := cmd.Flags().GetString("tools")
 
-		// 优先使用agent模式
+		// Prioritize using agent mode
 		if agentName != "" {
-			// 验证agent名称是否存在
+			// Verify if agent name exists
 			if _, ok := cfg.Agents[agentName]; !ok {
-				return fmt.Errorf("Agent配置不存在: %s", agentName)
+				return fmt.Errorf("Agent configuration does not exist: %s", agentName)
 			}
 
-			// 创建Agent交互应用
+			// Create Agent interactive application
 			agentApp, err := agent.NewAgentApp(agentName)
 			if err != nil {
-				return fmt.Errorf("创建Agent应用失败: %w", err)
+				return fmt.Errorf("failed to create Agent application: %w", err)
 			}
 
-			// 运行交互界面
-			fmt.Printf("启动与Agent %s 的交互会话...\n", agentName)
-			fmt.Println("使用 'q' 或 'Ctrl+C' 退出")
+			// Run interactive interface
+			fmt.Printf("Starting interactive session with Agent %s...\n", agentName)
+			fmt.Println("Use 'q' or 'Ctrl+C' to exit")
 
 			if err := agentApp.Run(); err != nil {
-				return fmt.Errorf("运行交互界面失败: %w", err)
+				return fmt.Errorf("failed to run interactive interface: %w", err)
 			}
 		} else if chatName != "" || modelName != "" {
-			// 使用chat模式
+			// Use chat mode
 			var system string
 			var tools []string
 
 			if chatName != "" {
-				// 使用 chats 预设
+				// Use chats preset
 				preset, ok := cfg.Chats[chatName]
 				if !ok {
-					return fmt.Errorf("chat 预设不存在: %s", chatName)
+					return fmt.Errorf("chat preset does not exist: %s", chatName)
 				}
 				modelName = preset.Model
 				tools = append(tools, preset.Tools...)
 				system = preset.System
 			} else {
-				// 解析工具列表
+				// Parse tool list
 				if toolsStr != "" {
 					tools = strings.Split(toolsStr, ",")
-					// 去除空格
+					// Remove whitespace
 					for i, tool := range tools {
 						tools[i] = strings.TrimSpace(tool)
 					}
 				}
 				if modelName == "" {
-					return fmt.Errorf("必须指定 --model 或者 --chat 预设名称")
+					return fmt.Errorf("must specify --model or --chat preset name")
 				}
 			}
 
-			// 创建聊天应用
+			// Create chat application
 			chatApp := agent.NewChatApp(modelName, tools, system)
 
-			// 运行聊天界面
-			fmt.Printf("启动与Model %s 的聊天会话...\n", modelName)
+			// Run chat interface
+			fmt.Printf("Starting chat session with Model %s...\n", modelName)
 			if err := chatApp.Run(); err != nil {
-				return fmt.Errorf("运行聊天界面失败: %w", err)
+				return fmt.Errorf("failed to run chat interface: %w", err)
 			}
 		} else {
-			return fmt.Errorf("必须指定 --agent 名称或者 --chat/--model 进行聊天")
+			return fmt.Errorf("must specify --agent name or --chat/--model to start chat")
 		}
 
 		return nil
@@ -96,12 +96,12 @@ var agentCmd = &cobra.Command{
 }
 
 func init() {
-	// 添加 agent 子命令到根命令
+	// Add agent subcommand to root command
 	RootCmd.AddCommand(agentCmd)
 
-	// 为 agent 子命令添加参数
-	agentCmd.Flags().StringP("agent", "a", "", "指定要使用的Agent名称")
-	agentCmd.Flags().StringP("chat", "c", "", "指定 chat 预设名称（来自配置文件 chats）")
-	agentCmd.Flags().StringP("model", "m", "", "指定要聊天的Model（未指定 --chat 时必填）")
-	agentCmd.Flags().StringP("tools", "t", "", "指定可以使用的工具，多个工具用逗号分隔（未指定 --chat 时可选）")
+	// Add parameters for agent subcommand
+	agentCmd.Flags().StringP("agent", "a", "", "Specify the Agent name to use")
+	agentCmd.Flags().StringP("chat", "c", "", "Specify chat preset name (from config file chats)")
+	agentCmd.Flags().StringP("model", "m", "", "Specify the Model to chat with (required when --chat is not specified)")
+	agentCmd.Flags().StringP("tools", "t", "", "Specify available tools, separated by commas (optional when --chat is not specified)")
 }

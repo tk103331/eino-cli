@@ -8,18 +8,18 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// NewBingSearchTool 创建Bing搜索工具
+// NewBingSearchTool creates Bing search tool
 func NewBingSearchTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
 	ctx := context.Background()
 
-	// 创建Bing搜索配置
+	// Create Bing search configuration
 	bingConfig := &bingsearch.Config{
 		ToolName:   name,
 		ToolDesc:   cfg.Description,
-		MaxResults: 5, // 默认返回5个结果
+		MaxResults: 5, // Default return 5 results
 	}
 
-	// 从配置中读取必需和可选参数
+	// Read required and optional parameters from configuration
 	if apiKey, exists := cfg.Config["api_key"]; exists {
 		bingConfig.APIKey = apiKey.String()
 	}
@@ -29,6 +29,6 @@ func NewBingSearchTool(name string, cfg config.Tool) (tool.InvokableTool, error)
 		}
 	}
 
-	// 创建工具实例
+	// Create tool instance
 	return bingsearch.NewTool(ctx, bingConfig)
 }

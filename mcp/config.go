@@ -10,25 +10,25 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// ValidateConfig 验证MCP配置
+// ValidateConfig validates MCP configuration
 func ValidateConfig(cfg *config.Config) error {
 	if cfg == nil {
 		return NewMCPError("validate", "", "", ErrInvalidConfig)
 	}
 
-	// 验证MCP服务器配置
+	// Validate MCP server configurations
 	for serverName, serverConfig := range cfg.MCPServers {
 		if err := validateServerConfig(serverName, serverConfig); err != nil {
 			return err
 		}
 	}
 
-	// 验证Agent的MCP服务器引用
+	// Validate agent's MCP server references
 	for agentName, agentConfig := range cfg.Agents {
 		for _, serverName := range agentConfig.MCPServers {
 			if _, exists := cfg.MCPServers[serverName]; !exists {
 				return NewMCPError("validate", serverName, "",
-					fmt.Errorf("Agent %s 引用了不存在的MCP服务器: %s", agentName, serverName))
+					fmt.Errorf("agent %s references non-existent MCP server: %s", agentName, serverName))
 			}
 		}
 	}
@@ -36,34 +36,34 @@ func ValidateConfig(cfg *config.Config) error {
 	return nil
 }
 
-// validateServerConfig 验证单个MCP服务器配置
+// validateServerConfig validates a single MCP server configuration
 func validateServerConfig(serverName string, serverConfig config.MCPServer) error {
-	// 验证服务器名称
+	// Validate server name
 	if strings.TrimSpace(serverName) == "" {
 		return NewMCPError("validate", serverName, "",
-			fmt.Errorf("MCP服务器名称不能为空"))
+			fmt.Errorf("MCP server name cannot be empty"))
 	}
 
-	// 验证命令或URL
+	// Validate command or URL
 	if serverConfig.Cmd == "" && serverConfig.URL == "" {
 		return NewMCPError("validate", serverName, "",
-			fmt.Errorf("MCP服务器必须指定cmd或url"))
+			fmt.Errorf("MCP server must specify cmd or url"))
 	}
 
-	// 如果同时指定了cmd和url，返回错误
+	// If both cmd and url are specified, return error
 	if serverConfig.Cmd != "" && serverConfig.URL != "" {
 		return NewMCPError("validate", serverName, "",
-			fmt.Errorf("MCP服务器不能同时指定cmd和url"))
+			fmt.Errorf("MCP server cannot specify both cmd and url"))
 	}
 
-	// 验证命令路径
+	// Validate command path
 	if serverConfig.Cmd != "" {
 		if err := validateCommand(serverName, serverConfig.Cmd); err != nil {
 			return err
 		}
 	}
 
-	// 验证URL格式
+	// Validate URL format
 	if serverConfig.URL != "" {
 		if err := validateURL(serverName, serverConfig.URL); err != nil {
 			return err
@@ -73,50 +73,50 @@ func validateServerConfig(serverName string, serverConfig config.MCPServer) erro
 	return nil
 }
 
-// validateCommand 验证命令路径
+// validateCommand validates command path
 func validateCommand(serverName, command string) error {
-	// 解析命令（可能包含参数）
+	// Parse command (may contain parameters)
 	parts := strings.Fields(command)
 	if len(parts) == 0 {
 		return NewMCPError("validate", serverName, "",
-			fmt.Errorf("命令不能为空"))
+			fmt.Errorf("command cannot be empty"))
 	}
 
 	cmdPath := parts[0]
 
-	// 如果是相对路径，检查是否存在
+	// If relative path, check if exists
 	if !filepath.IsAbs(cmdPath) {
-		// 检查PATH中是否存在该命令
+		// Check if command exists in PATH
 		if _, err := os.Stat(cmdPath); err != nil {
-			// 如果当前目录不存在，尝试在PATH中查找
+			// If not in current directory, try to find in PATH
 			if _, pathErr := exec.LookPath(cmdPath); pathErr != nil {
 				return NewMCPError("validate", serverName, "",
-					fmt.Errorf("命令不存在: %s", cmdPath))
+					fmt.Errorf("command does not exist: %s", cmdPath))
 			}
 		}
 	} else {
-		// 绝对路径，直接检查文件是否存在
+		// Absolute path, directly check if file exists
 		if _, err := os.Stat(cmdPath); err != nil {
 			return NewMCPError("validate", serverName, "",
-				fmt.Errorf("命令文件不存在: %s", cmdPath))
+				fmt.Errorf("command file does not exist: %s", cmdPath))
 		}
 	}
 
 	return nil
 }
 
-// validateURL 验证URL格式
+// validateURL validates URL format
 func validateURL(serverName, url string) error {
-	// 简单的URL格式验证
+	// Simple URL format validation
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "ws://") && !strings.HasPrefix(url, "wss://") {
 		return NewMCPError("validate", serverName, "",
-			fmt.Errorf("无效的URL格式: %s，必须以http://、https://、ws://或wss://开头", url))
+			fmt.Errorf("invalid URL format: %s, must start with http://, https://, ws:// or wss://", url))
 	}
 
 	return nil
 }
 
-// GetServerConfig 获取指定服务器的配置
+// GetServerConfig gets configuration for specified server
 func GetServerConfig(cfg *config.Config, serverName string) (*config.MCPServer, error) {
 	if cfg == nil {
 		return nil, NewMCPError("get_config", serverName, "", ErrInvalidConfig)
@@ -130,7 +130,7 @@ func GetServerConfig(cfg *config.Config, serverName string) (*config.MCPServer, 
 	return &serverConfig, nil
 }
 
-// GetAgentMCPServers 获取指定Agent的MCP服务器列表
+// GetAgentMCPServers gets MCP server list for specified agent
 func GetAgentMCPServers(cfg *config.Config, agentName string) ([]string, error) {
 	if cfg == nil {
 		return nil, NewMCPError("get_agent_servers", "", "", ErrInvalidConfig)
@@ -139,7 +139,7 @@ func GetAgentMCPServers(cfg *config.Config, agentName string) ([]string, error) 
 	agentConfig, exists := cfg.Agents[agentName]
 	if !exists {
 		return nil, NewMCPError("get_agent_servers", "", "",
-			fmt.Errorf("Agent配置不存在: %s", agentName))
+			fmt.Errorf("agent configuration does not exist: %s", agentName))
 	}
 
 	return agentConfig.MCPServers, nil

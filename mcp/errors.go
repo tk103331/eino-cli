@@ -5,49 +5,49 @@ import (
 	"fmt"
 )
 
-// MCP相关错误定义
+// MCP related error definitions
 var (
-	// ErrMCPNotInitialized MCP管理器未初始化
-	ErrMCPNotInitialized = errors.New("MCP管理器未初始化")
+	// ErrMCPNotInitialized MCP manager not initialized
+	ErrMCPNotInitialized = errors.New("MCP manager not initialized")
 
-	// ErrServerNotFound MCP服务器未找到
-	ErrServerNotFound = errors.New("MCP服务器未找到")
+	// ErrServerNotFound MCP server not found
+	ErrServerNotFound = errors.New("MCP server not found")
 
-	// ErrToolNotFound MCP工具未找到
-	ErrToolNotFound = errors.New("MCP工具未找到")
+	// ErrToolNotFound MCP tool not found
+	ErrToolNotFound = errors.New("MCP tool not found")
 
-	// ErrInvalidConfig 无效的MCP配置
-	ErrInvalidConfig = errors.New("无效的MCP配置")
+	// ErrInvalidConfig Invalid MCP configuration
+	ErrInvalidConfig = errors.New("Invalid MCP configuration")
 
-	// ErrConnectionFailed MCP连接失败
-	ErrConnectionFailed = errors.New("MCP连接失败")
+	// ErrConnectionFailed MCP connection failed
+	ErrConnectionFailed = errors.New("MCP connection failed")
 )
 
-// MCPError MCP错误包装器
+// MCPError MCP error wrapper
 type MCPError struct {
-	Op     string // 操作名称
-	Server string // 服务器名称
-	Tool   string // 工具名称
-	Err    error  // 原始错误
+	Op     string // Operation name
+	Server string // Server name
+	Tool   string // Tool name
+	Err    error  // Original error
 }
 
-// Error 实现error接口
+// Error implements error interface
 func (e *MCPError) Error() string {
 	if e.Server != "" && e.Tool != "" {
-		return fmt.Sprintf("MCP错误 [%s] 服务器:%s 工具:%s - %v", e.Op, e.Server, e.Tool, e.Err)
+		return fmt.Sprintf("MCP error [%s] server:%s tool:%s - %v", e.Op, e.Server, e.Tool, e.Err)
 	} else if e.Server != "" {
-		return fmt.Sprintf("MCP错误 [%s] 服务器:%s - %v", e.Op, e.Server, e.Err)
+		return fmt.Sprintf("MCP error [%s] server:%s - %v", e.Op, e.Server, e.Err)
 	} else {
-		return fmt.Sprintf("MCP错误 [%s] - %v", e.Op, e.Err)
+		return fmt.Sprintf("MCP error [%s] - %v", e.Op, e.Err)
 	}
 }
 
-// Unwrap 返回原始错误
+// Unwrap returns original error
 func (e *MCPError) Unwrap() error {
 	return e.Err
 }
 
-// NewMCPError 创建新的MCP错误
+// NewMCPError creates new MCP error
 func NewMCPError(op, server, tool string, err error) *MCPError {
 	return &MCPError{
 		Op:     op,
@@ -57,7 +57,7 @@ func NewMCPError(op, server, tool string, err error) *MCPError {
 	}
 }
 
-// IsConnectionError 检查是否为连接错误
+// IsConnectionError checks if it's a connection error
 func IsConnectionError(err error) bool {
 	if mcpErr, ok := err.(*MCPError); ok {
 		return errors.Is(mcpErr.Err, ErrConnectionFailed)
@@ -65,7 +65,7 @@ func IsConnectionError(err error) bool {
 	return errors.Is(err, ErrConnectionFailed)
 }
 
-// IsConfigError 检查是否为配置错误
+// IsConfigError checks if it's a configuration error
 func IsConfigError(err error) bool {
 	if mcpErr, ok := err.(*MCPError); ok {
 		return errors.Is(mcpErr.Err, ErrInvalidConfig)

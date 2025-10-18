@@ -11,16 +11,16 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// NewHTTPRequestTool 创建HTTP请求工具
+// NewHTTPRequestTool creates HTTP request tool
 func NewHTTPRequestTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
 	ctx := context.Background()
 
-	// 默认配置
+	// Default configuration
 	headers := make(map[string]string)
 	timeout := 30 * time.Second
-	method := "GET" // 默认GET方法
+	method := "GET" // Default GET method
 
-	// 从配置中读取参数
+	// Read parameters from configuration
 	if timeoutConfig, exists := cfg.Config["timeout"]; exists {
 		if val := timeoutConfig.Int(); val > 0 {
 			timeout = time.Duration(val) * time.Second
@@ -40,13 +40,13 @@ func NewHTTPRequestTool(name string, cfg config.Tool) (tool.InvokableTool, error
 		}
 	}
 
-	// 创建HTTP客户端
+	// Create HTTP client
 	httpClient := &http.Client{
 		Timeout:   timeout,
 		Transport: &http.Transport{},
 	}
 
-	// 根据方法类型创建相应的工具
+	// Create corresponding tool based on method type
 	switch method {
 	case "POST":
 		postConfig := &postTool.Config{
@@ -54,7 +54,7 @@ func NewHTTPRequestTool(name string, cfg config.Tool) (tool.InvokableTool, error
 			HttpClient: httpClient,
 		}
 		return postTool.NewTool(ctx, postConfig)
-	default: // GET或其他方法默认使用GET
+	default: // GET or other methods default to GET
 		getConfig := &getTool.Config{
 			Headers:    headers,
 			HttpClient: httpClient,

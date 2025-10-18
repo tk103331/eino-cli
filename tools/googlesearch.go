@@ -8,19 +8,19 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// NewGoogleSearchTool 创建Google搜索工具
+// NewGoogleSearchTool creates Google search tool
 func NewGoogleSearchTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
 	ctx := context.Background()
 
-	// 创建Google搜索配置
+	// Create Google search configuration
 	googleConfig := &googlesearch.Config{
 		ToolName: name,
 		ToolDesc: cfg.Description,
-		Num:      5,       // 默认返回5个结果
-		Lang:     "zh-CN", // 默认中文
+		Num:      5,       // Default return 5 results
+		Lang:     "zh-CN", // Default Chinese
 	}
 
-	// 从配置中读取必需和可选参数
+	// Read required and optional parameters from configuration
 	if apiKey, exists := cfg.Config["api_key"]; exists {
 		googleConfig.APIKey = apiKey.String()
 	}
@@ -39,6 +39,6 @@ func NewGoogleSearchTool(name string, cfg config.Tool) (tool.InvokableTool, erro
 		googleConfig.Lang = lang.String()
 	}
 
-	// 创建工具实例
+	// Create tool instance
 	return googlesearch.NewTool(ctx, googleConfig)
 }

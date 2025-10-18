@@ -9,20 +9,20 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// NewWikipediaTool 创建Wikipedia工具
+// NewWikipediaTool creates Wikipedia tool
 func NewWikipediaTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
 	ctx := context.Background()
 
-	// 创建默认配置
+	// Create default configuration
 	wikiConfig := &wikipedia.Config{
-		Language:    "zh",             // 默认中文
-		TopK:        5,                // 默认返回5个结果
-		DocMaxChars: 500,              // 默认摘要最大长度
-		Timeout:     15 * time.Second, // 默认超时时间
-		MaxRedirect: 3,                // 默认最大重定向次数
+		Language:    "zh",             // Default Chinese
+		TopK:        5,                // Default return 5 results
+		DocMaxChars: 500,              // Default summary max length
+		Timeout:     15 * time.Second, // Default timeout
+		MaxRedirect: 3,                // Default max redirect count
 	}
 
-	// 从配置中读取参数
+	// Read parameters from configuration
 	if language, exists := cfg.Config["language"]; exists {
 		wikiConfig.Language = language.String()
 	}
@@ -53,6 +53,6 @@ func NewWikipediaTool(name string, cfg config.Tool) (tool.InvokableTool, error) 
 		}
 	}
 
-	// 创建工具实例
+	// Create tool instance
 	return wikipedia.NewTool(ctx, wikiConfig)
 }

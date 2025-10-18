@@ -15,25 +15,25 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// HTTPConfig HTTP工具配置结构体
+// HTTPConfig HTTP tool configuration structure
 type HTTPConfig struct {
-	URL     string            `yaml:"url"`     // 请求URL模板
-	Method  string            `yaml:"method"`  // HTTP方法
-	Headers map[string]string `yaml:"headers"` // 请求头
-	Body    string            `yaml:"body"`    // 请求体模板
-	Timeout int               `yaml:"timeout"` // 超时时间(秒)
+	URL     string            `yaml:"url"`     // Request URL template
+	Method  string            `yaml:"method"`  // HTTP method
+	Headers map[string]string `yaml:"headers"` // Request headers
+	Body    string            `yaml:"body"`    // Request body template
+	Timeout int               `yaml:"timeout"` // Timeout in seconds
 }
 
-// HTTPTool HTTP工具实现
+// HTTPTool HTTP tool implementation
 type HTTPTool struct {
 	info       *schema.ToolInfo
 	config     config.Tool
 	httpConfig *HTTPConfig
 }
 
-// NewHTTPTool 创建HTTP工具
+// NewHTTPTool creates HTTP tool
 func NewHTTPTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
-	// 初始化HTTPConfig
+	// Initialize HTTPConfig
 	httpConfig := &HTTPConfig{}
 	if cfg.Config != nil {
 		if urlValue, exists := cfg.Config["url"]; exists {
@@ -56,35 +56,35 @@ func NewHTTPTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
 		}
 	}
 
-	// 检查必要属性
+	// Check required attributes
 	if httpConfig.URL == "" {
-		return nil, fmt.Errorf("http工具必须配置url属性")
+		return nil, fmt.Errorf("http tool must configure url attribute")
 	}
 
-	// 设置默认值
+	// Set default values
 	if httpConfig.Method == "" {
 		httpConfig.Method = "GET"
 	}
 	if httpConfig.Timeout == 0 {
-		httpConfig.Timeout = 30 // 默认30秒超时
+		httpConfig.Timeout = 30 // Default 30 seconds timeout
 	}
 
-	// 获取描述信息
+	// Get description information
 	desc := cfg.Description
 	if desc == "" {
-		desc = "HTTP工具"
+		desc = "HTTP tool"
 	}
 
-	// 创建工具信息
+	// Create tool information
 	toolInfo := &schema.ToolInfo{
 		Name: name,
 		Desc: desc,
 	}
 
-	// 添加参数信息
+	// Add parameter information
 	params := make(map[string]*schema.ParameterInfo)
 	for _, param := range cfg.Params {
-		// 将字符串类型转换为schema.DataType
+		// Convert string type to schema.DataType
 		var dataType schema.DataType
 		switch param.Type {
 		case "string":
@@ -117,77 +117,77 @@ func NewHTTPTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
 	}, nil
 }
 
-// Info 获取工具信息
+// Info gets tool information
 func (h *HTTPTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	return h.info, nil
 }
 
-// InvokableRun 实现InvokableTool接口
+// InvokableRun implements InvokableTool interface
 func (h *HTTPTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	// 解析参数
+	// Parse parameters
 	var args map[string]interface{}
 	if argumentsInJSON != "" {
 		if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
-			return "", fmt.Errorf("解析参数失败: %v", err)
+			return "", fmt.Errorf("failed to parse parameters: %v", err)
 		}
 	}
 
-	// 模板替换URL
+	// Template replacement for URL
 	url, err := h.renderTemplate(h.httpConfig.URL, args)
 	if err != nil {
-		return "", fmt.Errorf("渲染URL模板失败: %v", err)
+		return "", fmt.Errorf("failed to render URL template: %v", err)
 	}
 
-	// 准备请求体
+	// Prepare request body
 	var body io.Reader
 	if h.httpConfig.Body != "" {
 		bodyStr, err := h.renderTemplate(h.httpConfig.Body, args)
 		if err != nil {
-			return "", fmt.Errorf("渲染请求体模板失败: %v", err)
+			return "", fmt.Errorf("failed to render request body template: %v", err)
 		}
 		body = strings.NewReader(bodyStr)
 	}
 
-	// 创建HTTP请求
+	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, h.httpConfig.Method, url, body)
 	if err != nil {
-		return "", fmt.Errorf("创建HTTP请求失败: %v", err)
+		return "", fmt.Errorf("failed to create HTTP request: %v", err)
 	}
 
-	// 设置请求头
+	// Set request headers
 	if h.httpConfig.Headers != nil {
 		for key, value := range h.httpConfig.Headers {
 			headerValue, err := h.renderTemplate(value, args)
 			if err != nil {
-				return "", fmt.Errorf("渲染请求头模板失败: %v", err)
+				return "", fmt.Errorf("failed to render request header template: %v", err)
 			}
 			req.Header.Set(key, headerValue)
 		}
 	}
 
-	// 发送HTTP请求
+	// Send HTTP request
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("发送HTTP请求失败: %v", err)
+		return "", fmt.Errorf("failed to send HTTP request: %v", err)
 	}
 	defer resp.Body.Close()
 
-	// 读取响应
+	// Read response
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %v", err)
+		return "", fmt.Errorf("failed to read response: %v", err)
 	}
 
-	// 检查HTTP状态码
+	// Check HTTP status code
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("HTTP请求失败，状态码: %d, 响应: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("HTTP request failed, status code: %d, response: %s", resp.StatusCode, string(respBody))
 	}
 
 	return string(respBody), nil
 }
 
-// renderTemplate 渲染模板
+// renderTemplate renders template
 func (h *HTTPTool) renderTemplate(templateStr string, args map[string]interface{}) (string, error) {
 	tmpl, err := template.New("http").Parse(templateStr)
 	if err != nil {

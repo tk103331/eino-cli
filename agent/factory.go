@@ -5,25 +5,25 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// Factory 用于创建Agent实例
+// Factory is used to create Agent instances
 type Factory struct {
 	cfg *config.Config
 }
 
-// NewFactory 创建一个新的Factory
+// NewFactory creates a new Factory
 func NewFactory(cfg *config.Config) *Factory {
 	return &Factory{cfg: cfg}
 }
 
-// CreateAgent 根据名称创建Agent
+// CreateAgent creates Agent based on name
 func (f *Factory) CreateAgent(name string) (Agent, error) {
-	// 获取Agent配置
+	// Get Agent configuration
 	agentCfg, ok := f.cfg.Agents[name]
 	if !ok {
-		return nil, fmt.Errorf("Agent配置不存在: %s", name)
+		return nil, fmt.Errorf("Agent configuration does not exist: %s", name)
 	}
 
-	// 创建ReactAgent
+	// Create ReactAgent
 	agent := NewReactAgent(name, &agentCfg)
 	return agent, nil
 }

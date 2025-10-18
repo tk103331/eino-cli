@@ -8,23 +8,23 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// NewBrowserUseTool 创建浏览器使用工具
+// NewBrowserUseTool creates browser usage tool
 func NewBrowserUseTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
 	ctx := context.Background()
 
-	// 创建BrowserUse配置
+	// Create BrowserUse configuration
 	browserConfig := &browseruse.Config{}
 
-	// 从配置中读取可选参数
+	// Read optional parameters from configuration
 	for _, param := range cfg.Params {
 		switch param.Name {
-		// 这里可以根据实际的Config结构添加更多配置项
-		// 目前browseruse.Config可能包含浏览器相关的配置
+		// More configuration items can be added here based on actual Config structure
+		// Currently browseruse.Config may contain browser-related configurations
 		default:
-			// 暂时不处理未知参数
+			// Temporarily don't handle unknown parameters
 		}
 	}
 
-	// 创建工具实例
+	// Create tool instance
 	return browseruse.NewBrowserUseTool(ctx, browserConfig)
 }

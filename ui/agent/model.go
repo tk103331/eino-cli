@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// MessageType 消息类型
+// MessageType represents the type of a message
 type MessageType int
 
 const (
@@ -20,14 +20,14 @@ const (
 	ErrorMessage
 )
 
-// Message 表示一条聊天消息
+// Message represents a chat message
 type Message struct {
 	Type    MessageType
 	Content string
-	Name    string // 工具名称（仅用于工具消息）
+	Name    string // Tool name (only used for tool messages)
 }
 
-// ViewModel 是Agent界面的模型
+// ViewModel is the model for the Agent interface
 type ViewModel struct {
 	messages         []Message
 	input            string
@@ -37,13 +37,13 @@ type ViewModel struct {
 	height           int
 	isWaiting        bool
 	errorMsg         string
-	onSendMsg        func(string) error    // 发送消息的回调函数
-	streamingContent string                // 当前正在流式接收的内容
-	renderer         *glamour.TermRenderer // markdown渲染器
-	scrollOffset     int                   // 滚动偏移量，用于上下键滚动
+	onSendMsg        func(string) error    // Callback function for sending messages
+	streamingContent string                // Currently streaming content
+	renderer         *glamour.TermRenderer // Markdown renderer
+	scrollOffset     int                   // Scroll offset for up/down key scrolling
 }
 
-// 消息类型定义
+// Message type definitions
 type ResponseMsg string
 type StreamChunkMsg string
 type StreamEndMsg struct{}
@@ -57,9 +57,9 @@ type ToolEndMsg struct {
 	Result string
 }
 
-// NewViewModel 创建新的ViewModel
+// NewViewModel creates a new ViewModel
 func NewViewModel(onSendMsg func(string) error) *ViewModel {
-	// 创建glamour渲染器 - 与chat界面相同
+	// Create glamour renderer - same as chat interface
 	renderer, _ := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
 	)
@@ -72,12 +72,12 @@ func NewViewModel(onSendMsg func(string) error) *ViewModel {
 	}
 }
 
-// Init 初始化模型
+// Init initializes the model
 func (m ViewModel) Init() tea.Cmd {
-	return nil // 与chat界面相同，不需要初始化命令
+	return nil // Same as chat interface, no initialization commands needed
 }
 
-// Update 处理消息
+// Update handles messages
 func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -87,7 +87,7 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.isWaiting {
-			// 等待响应时只允许退出
+			// Only allow exit when waiting for response
 			switch msg.String() {
 			case "ctrl+c":
 				return m, tea.Quit
@@ -114,25 +114,25 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			if m.input != "" && !m.isWaiting {
-				// 添加用户消息
+				// Add user message
 				m.messages = append(m.messages, Message{
 					Type:    UserMessage,
 					Content: m.input,
 				})
 
-				// 发送消息
+				// Send message
 				userInput := m.input
 				m.input = ""
 				m.isWaiting = true
 				m.streamingContent = ""
 				m.errorMsg = ""
 
-				// 调用回调函数发送消息
+				// Call callback function to send message
 				if m.onSendMsg != nil {
 					go func() {
 						if err := m.onSendMsg(userInput); err != nil {
-							// 如果发送失败，发送错误消息
-							m.errorMsg = fmt.Sprintf("发送消息失败: %v", err)
+							// If sending fails, send error message
+							m.errorMsg = fmt.Sprintf("Failed to send message: %v", err)
 						}
 					}()
 				}
@@ -150,7 +150,7 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case ResponseMsg:
-		// 完整响应消息
+		// Complete response message
 		m.messages = append(m.messages, Message{
 			Type:    AssistantMessage,
 			Content: string(msg),
@@ -160,12 +160,12 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case StreamChunkMsg:
-		// 流式响应块
+		// Streaming response chunk
 		m.streamingContent += string(msg)
 		return m, nil
 
 	case StreamEndMsg:
-		// 流式结束，将流式内容转换为正式消息
+		// Stream ended, convert streaming content to formal message
 		if m.streamingContent != "" {
 			m.messages = append(m.messages, Message{
 				Type:    AssistantMessage,
@@ -177,7 +177,7 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ToolStartMsg:
-		// 工具开始执行
+		// Tool execution started
 		content := fmt.Sprintf("Calling tool: %s", msg.Name)
 		if msg.Arguments != "" && msg.Arguments != "{}" {
 			content += fmt.Sprintf("\nArguments: %s", msg.Arguments)
@@ -190,13 +190,13 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ToolEndMsg:
-		// 工具执行结束
+		// Tool execution ended
 		content := fmt.Sprintf("Tool %s completed", msg.Name)
 		if msg.Result != "" {
-			// 清理结果，移除多余的换行符
+			// Clean up result, remove extra newlines
 			result := strings.TrimSpace(msg.Result)
 			if len(result) > 200 {
-				// 如果结果太长，截断并添加省略号
+				// If result is too long, truncate and add ellipsis
 				result = result[:197] + "..."
 			}
 			content += fmt.Sprintf("\nResult: %s", result)
@@ -209,7 +209,7 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ErrorMsg:
-		// 错误消息 - 直接显示所有错误消息（过滤已在应用层处理）
+		// Error message - directly display all error messages (filtering handled at application layer)
 		errorText := string(msg)
 		m.messages = append(m.messages, Message{
 			Type:    ErrorMessage,
@@ -224,9 +224,9 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View 渲染界面
+// View renders the interface
 func (m ViewModel) View() string {
-	// 样式定义 - 完全参考chat界面
+	// Style definitions - completely reference chat interface
 	userStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#00ff00")).
 		Bold(true)
@@ -251,14 +251,14 @@ func (m ViewModel) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#666666")).
 		Padding(0, 1).
-		Width(m.width - 4) // 减去边框和内边距的宽度
+		Width(m.width - 4) // Subtract border and padding width
 
-	// 构建消息显示区域
+	// Build message display area
 	var messageLines []string
 	messageLines = append(messageLines, "=== Eino CLI Agent ===")
 	messageLines = append(messageLines, "")
 
-	// 显示消息历史 - 使用滚动逻辑
+	// Display message history - use scrolling logic
 	visibleMessages := m.messages
 	if m.scrollOffset > 0 && m.scrollOffset < len(m.messages) {
 		visibleMessages = m.messages[m.scrollOffset:]
@@ -269,7 +269,7 @@ func (m ViewModel) View() string {
 		case UserMessage:
 			messageLines = append(messageLines, userStyle.Render("You: ")+msg.Content)
 		case AssistantMessage:
-			// 对AI回复使用markdown渲染
+			// Use markdown rendering for AI replies
 			renderedContent := m.renderMarkdown(msg.Content)
 			messageLines = append(messageLines, assistantStyle.Render("AI: ")+renderedContent)
 		case ToolStartMessage:
@@ -282,56 +282,56 @@ func (m ViewModel) View() string {
 		messageLines = append(messageLines, "")
 	}
 
-	// 显示正在流式接收的内容
+	// Display currently streaming content
 	if m.streamingContent != "" {
-		// 对流式内容也使用markdown渲染
+		// Use markdown rendering for streaming content as well
 		renderedStreamContent := m.renderMarkdown(m.streamingContent)
 		messageLines = append(messageLines, assistantStyle.Render("AI: ")+renderedStreamContent)
 		messageLines = append(messageLines, "")
 	}
 
-	// 显示等待状态
+	// Display waiting status
 	if m.isWaiting {
 		messageLines = append(messageLines, "AI is thinking...")
 		messageLines = append(messageLines, "")
 	}
 
-	// 显示错误信息
+	// Display error information
 	if m.errorMsg != "" {
 		messageLines = append(messageLines, errorStyle.Render("Error: "+m.errorMsg))
 		messageLines = append(messageLines, "")
 	}
 
-	// 限制显示的行数
-	maxLines := m.height - 4 // 为输入框和边框留出空间
+	// Limit the number of displayed lines
+	maxLines := m.height - 4 // Reserve space for input box and border
 	if maxLines > 0 && len(messageLines) > maxLines {
 		messageLines = messageLines[len(messageLines)-maxLines:]
 	}
 
 	messageArea := strings.Join(messageLines, "\n")
 
-	// 构建输入区域
+	// Build input area
 	inputPrompt := "> "
 	if m.isWaiting {
 		inputPrompt = "Waiting for response... "
 	}
 	inputArea := inputStyle.Render(inputPrompt + m.input)
 
-	// 构建帮助信息
+	// Build help information
 	helpText := "Press Ctrl+C to quit, ↑/↓ to scroll, Enter to send"
 
 	return fmt.Sprintf("%s\n\n%s\n%s", messageArea, inputArea, helpText)
 }
 
-// renderMarkdown 渲染markdown内容 - 与chat界面相同
+// renderMarkdown renders markdown content - same as chat interface
 func (m *ViewModel) renderMarkdown(content string) string {
 	if m.renderer == nil {
-		return content // 如果渲染器未初始化，返回原始内容
+		return content // If renderer is not initialized, return original content
 	}
 
 	rendered, err := m.renderer.Render(content)
 	if err != nil {
-		return content // 如果渲染失败，返回原始内容
+		return content // If rendering fails, return original content
 	}
 
 	return strings.TrimSpace(rendered)

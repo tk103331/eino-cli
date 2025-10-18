@@ -15,7 +15,7 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// createOpenAIModel 创建 OpenAI 模型
+// createOpenAIModel creates OpenAI model
 func (f *Factory) createOpenAIModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &openai.ChatModelConfig{
 		Model:   modelCfg.Model,
@@ -38,7 +38,7 @@ func (f *Factory) createOpenAIModel(ctx context.Context, modelCfg *config.Model,
 	return openai.NewChatModel(ctx, cfg)
 }
 
-// createClaudeModel 创建 Claude 模型
+// createClaudeModel creates Claude model
 func (f *Factory) createClaudeModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &claude.Config{
 		Model:   modelCfg.Model,
@@ -60,7 +60,7 @@ func (f *Factory) createClaudeModel(ctx context.Context, modelCfg *config.Model,
 	return claude.NewChatModel(ctx, cfg)
 }
 
-// createGeminiModel 创建 Gemini 模型
+// createGeminiModel creates Gemini model
 func (f *Factory) createGeminiModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &gemini.Config{
 		Model: modelCfg.Model,
@@ -81,7 +81,7 @@ func (f *Factory) createGeminiModel(ctx context.Context, modelCfg *config.Model,
 	return gemini.NewChatModel(ctx, cfg)
 }
 
-// createQwenModel 创建 Qwen 模型
+// createQwenModel creates Qwen model
 func (f *Factory) createQwenModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &qwen.ChatModelConfig{
 		Model:   modelCfg.Model,
@@ -104,19 +104,19 @@ func (f *Factory) createQwenModel(ctx context.Context, modelCfg *config.Model, p
 	return qwen.NewChatModel(ctx, cfg)
 }
 
-// createQianfanModel 创建 Qianfan 模型
+// createQianfanModel creates Qianfan model
 func (f *Factory) createQianfanModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &qianfan.ChatModelConfig{
 		Model: modelCfg.Model,
 	}
 
-	// Qianfan 配置可能需要根据实际 API 调整
-	// 这里提供基本配置，实际使用时可能需要根据具体需求配置
+	// Qianfan configuration may need adjustment based on actual API
+	// Basic configuration provided here, may need specific configuration based on requirements
 
 	return qianfan.NewChatModel(ctx, cfg)
 }
 
-// createArkModel 创建 Ark 模型
+// createArkModel creates Ark model
 func (f *Factory) createArkModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &ark.ChatModelConfig{
 		Model:   modelCfg.Model,
@@ -139,7 +139,7 @@ func (f *Factory) createArkModel(ctx context.Context, modelCfg *config.Model, pr
 	return ark.NewChatModel(ctx, cfg)
 }
 
-// createDeepSeekModel 创建 DeepSeek 模型
+// createDeepSeekModel creates DeepSeek model
 func (f *Factory) createDeepSeekModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &deepseek.ChatModelConfig{
 		Model:   modelCfg.Model,
@@ -162,15 +162,15 @@ func (f *Factory) createDeepSeekModel(ctx context.Context, modelCfg *config.Mode
 	return deepseek.NewChatModel(ctx, cfg)
 }
 
-// createOllamaModel 创建 Ollama 模型
+// createOllamaModel creates Ollama model
 func (f *Factory) createOllamaModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &ollama.ChatModelConfig{
 		Model:   modelCfg.Model,
 		BaseURL: providerCfg.BaseURL,
 	}
 
-	// Ollama 的配置通过 Options 字段设置
-	// 这里暂时简化处理，实际使用时可能需要根据具体需求配置 Options
+	// Ollama configuration is set through Options field
+	// Simplified handling here, may need to configure Options based on specific requirements
 
 	return ollama.NewChatModel(ctx, cfg)
 }

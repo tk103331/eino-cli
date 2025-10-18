@@ -9,15 +9,15 @@ import (
 	mcpProtocol "github.com/mark3labs/mcp-go/mcp"
 )
 
-// discoverTools 从MCP服务器发现工具
+// discoverTools discovers tools from MCP servers
 func (c *Client) discoverTools(ctx context.Context) error {
 	for serverName, mcpClient := range c.clients {
-		// 检查客户端是否为空
+		// Check if client is nil
 		if mcpClient == nil {
-			return fmt.Errorf("服务器 %s 的MCP客户端未初始化", serverName)
+			return fmt.Errorf("MCP client for server %s is not initialized", serverName)
 		}
 
-		// 初始化MCP客户端连接
+		// Initialize MCP client connection
 		initRequest := mcpProtocol.InitializeRequest{
 			Params: mcpProtocol.InitializeParams{
 				ProtocolVersion: "2024-11-05",
@@ -30,25 +30,25 @@ func (c *Client) discoverTools(ctx context.Context) error {
 
 		_, err := mcpClient.Initialize(ctx, initRequest)
 		if err != nil {
-			return fmt.Errorf("初始化服务器 %s 的MCP客户端失败: %w", serverName, err)
+			return fmt.Errorf("failed to initialize MCP client for server %s: %w", serverName, err)
 		}
 
-		// 使用eino-ext的mcp包获取工具
+		// Use eino-ext's mcp package to get tools
 		mcpTools, err := mcp.GetTools(ctx, &mcp.Config{Cli: mcpClient})
 		if err != nil {
-			return fmt.Errorf("从服务器 %s 获取工具失败: %w", serverName, err)
+			return fmt.Errorf("failed to get tools from server %s: %w", serverName, err)
 		}
 
-		// 将工具添加到工具映射中
+		// Add tools to the tool mapping
 		for _, mcpTool := range mcpTools {
-			// 尝试将BaseTool转换为InvokableTool
+			// Try to convert BaseTool to InvokableTool
 			if invokableTool, ok := mcpTool.(tool.InvokableTool); ok {
-				// 获取工具信息以获取工具名称
+				// Get tool info to obtain tool name
 				info, err := mcpTool.Info(ctx)
 				if err != nil {
-					return fmt.Errorf("获取工具信息失败: %w", err)
+					return fmt.Errorf("failed to get tool info: %w", err)
 				}
-				// 使用 serverName_toolName 作为工具名称以避免冲突
+				// Use serverName_toolName as tool name to avoid conflicts
 				toolName := fmt.Sprintf("%s_%s", serverName, info.Name)
 				c.tools[toolName] = invokableTool
 			}

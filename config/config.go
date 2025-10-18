@@ -8,10 +8,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// 私有全局变量保存配置
+// Private global variable to store configuration
 var globalConfig *Config
 
-// Config 表示Eino CLI的配置
+// Config represents the configuration for Eino CLI
 type Config struct {
 	Agents       map[string]Agent     `yaml:"agents,omitempty"`
 	Providers    map[string]Provider  `yaml:"providers,omitempty"`
@@ -23,7 +23,7 @@ type Config struct {
 	Settings     Settings             `yaml:"settings,omitempty"`
 }
 
-// Agent 表示AI代理配置
+// Agent represents AI agent configuration
 type Agent struct {
 	System     string   `yaml:"system"`
 	Model      string   `yaml:"model"`
@@ -31,21 +31,21 @@ type Agent struct {
 	MCPServers []string `yaml:"mcp_servers,omitempty"`
 }
 
-// Chat 表示预设聊天配置
+// Chat represents preset chat configuration
 type Chat struct {
 	System string   `yaml:"system,omitempty"`
 	Model  string   `yaml:"model"`
 	Tools  []string `yaml:"tools,omitempty"`
 }
 
-// Provider 表示AI提供商配置
+// Provider represents AI provider configuration
 type Provider struct {
 	Type    string `yaml:"type"`
 	BaseURL string `yaml:"base_url,omitempty"`
 	APIKey  string `yaml:"api_key,omitempty"`
 }
 
-// Model 表示AI模型配置
+// Model represents AI model configuration
 type Model struct {
 	Provider    string  `yaml:"provider"`
 	Model       string  `yaml:"model"`
@@ -55,7 +55,7 @@ type Model struct {
 	TopK        int     `yaml:"top_k,omitempty"`
 }
 
-// MCPServer 表示MCP服务器配置
+// MCPServer represents MCP server configuration
 type MCPServer struct {
 	Type string `yaml:"type"`
 	// for stdio
@@ -67,7 +67,7 @@ type MCPServer struct {
 	Headers map[string]string `yaml:"headers,omitempty"`
 }
 
-// Tool 表示工具配置
+// Tool represents tool configuration
 type Tool struct {
 	Type        string           `yaml:"type"`
 	Description string           `yaml:"description,omitempty"`
@@ -75,7 +75,7 @@ type Tool struct {
 	Params      []ToolParam      `yaml:"params,omitempty"`
 }
 
-// ToolParam 表示工具参数配置
+// ToolParam represents tool parameter configuration
 type ToolParam struct {
 	Name        string `yaml:"name"`
 	Type        string `yaml:"type"`
@@ -83,37 +83,37 @@ type ToolParam struct {
 	Required    bool   `yaml:"required,omitempty"`
 }
 
-// Settings 全局设置
+// Settings global settings
 type Settings struct {
 	Langfuse *langfuse.Config
 }
 
-// LoadConfig 从配置文件加载配置并保存到全局变量
+// LoadConfig loads configuration from file and saves to global variable
 func LoadConfig(configPath string) (*Config, error) {
-	// 检查配置文件是否存在
+	// Check if configuration file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("配置文件不存在: %s", configPath)
+		return nil, fmt.Errorf("configuration file does not exist: %s", configPath)
 	}
 
-	// 读取配置文件
+	// Read configuration file
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("读取配置文件失败: %w", err)
+		return nil, fmt.Errorf("failed to read configuration file: %w", err)
 	}
 
-	// 解析YAML
+	// Parse YAML
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("解析配置文件失败: %w", err)
+		return nil, fmt.Errorf("failed to parse configuration file: %w", err)
 	}
 
-	// 保存到全局变量
+	// Save to global variable
 	globalConfig = &cfg
 
 	return &cfg, nil
 }
 
-// GetConfig 获取全局配置
+// GetConfig gets global configuration
 func GetConfig() *Config {
 	return globalConfig
 }

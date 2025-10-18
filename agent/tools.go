@@ -6,7 +6,7 @@ import (
 	"github.com/tk103331/eino-cli/tools"
 )
 
-// createTool 创建工具实例
+// createTool creates tool instances
 func createTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
 	return tools.CreateTool(name, cfg)
 }

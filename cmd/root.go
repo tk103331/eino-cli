@@ -21,21 +21,21 @@ var RootCmd = &cobra.Command{
 	Short: "Eino CLI tool",
 	Long:  `A command line interface for Eino`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// 加载配置文件
+		// Load configuration file
 		cfg, err := config.LoadConfig(configPath)
 		if err != nil {
-			return fmt.Errorf("加载配置文件失败: %w", err)
+			return fmt.Errorf("failed to load configuration file: %w", err)
 		}
 
-		// 异步初始化MCP管理器（不阻塞命令执行）
+		// Asynchronously initialize MCP manager (does not block command execution)
 		go func() {
-			// 使用命令上下文，便于在命令结束时取消
+			// Use command context for cancellation when command ends
 			ctx := cmd.Context()
 			if ctx == nil {
 				ctx = context.Background()
 			}
 			if err := mcp.InitializeGlobalManager(ctx, cfg); err != nil {
-				fmt.Fprintf(os.Stderr, "异步初始化MCP管理器失败: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Failed to initialize MCP manager asynchronously: %v\n", err)
 			}
 		}()
 
@@ -53,13 +53,13 @@ func Execute() {
 }
 
 func init() {
-	// 获取用户主目录
+	// Get user home directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		homeDir = "."
 	}
 	defaultConfigPath := filepath.Join(homeDir, ".eino-cli", "config.yml")
 
-	// 添加全局参数
-	RootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "配置文件路径")
+	// Add global parameters
+	RootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "Configuration file path")
 }

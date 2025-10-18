@@ -11,7 +11,7 @@ import (
 	"github.com/tk103331/eino-cli/config"
 )
 
-// createMCPClient 根据配置创建MCP客户端
+// createMCPClient creates MCP client based on configuration
 func (c *Client) createMCPClient(ctx context.Context, serverName string, serverConfig config.MCPServer) (*client.Client, error) {
 	switch serverConfig.Type {
 	case "stdio", "STDIO":
@@ -21,17 +21,17 @@ func (c *Client) createMCPClient(ctx context.Context, serverName string, serverC
 	case "streamable-http", "STREAMABLE-HTTP", "http", "HTTP":
 		return c.createStreamableHTTPClient(ctx, serverConfig)
 	default:
-		return nil, fmt.Errorf("不支持的MCP服务器类型: %s", serverConfig.Type)
+		return nil, fmt.Errorf("unsupported MCP server type: %s", serverConfig.Type)
 	}
 }
 
-// createStdioClient 创建STDIO类型的MCP客户端
+// createStdioClient creates STDIO type MCP client
 func (c *Client) createStdioClient(ctx context.Context, serverConfig config.MCPServer) (*client.Client, error) {
 	if serverConfig.Cmd == "" {
-		return nil, fmt.Errorf("STDIO类型的MCP服务器必须指定cmd")
+		return nil, fmt.Errorf("STDIO type MCP server must specify cmd")
 	}
 
-	// 准备环境变量
+	// Prepare environment variables
 	var env []string
 	if len(serverConfig.Env) > 0 {
 		for key, value := range serverConfig.Env {
@@ -39,62 +39,62 @@ func (c *Client) createStdioClient(ctx context.Context, serverConfig config.MCPS
 		}
 	}
 
-	// 创建STDIO客户端
+	// Create STDIO client
 	mcpClient, err := client.NewStdioMCPClient(serverConfig.Cmd, env, serverConfig.Args...)
 	if err != nil {
-		return nil, fmt.Errorf("创建STDIO MCP客户端失败: %w", err)
+		return nil, fmt.Errorf("failed to create STDIO MCP client: %w", err)
 	}
 
 	return mcpClient, nil
 }
 
-// createStreamableHTTPClient 创建StreamableHTTP类型的MCP客户端
+// createStreamableHTTPClient creates StreamableHTTP type MCP client
 func (c *Client) createStreamableHTTPClient(ctx context.Context, serverConfig config.MCPServer) (*client.Client, error) {
 	if serverConfig.URL == "" {
-		return nil, fmt.Errorf("StreamableHTTP类型的MCP服务器必须指定URL")
+		return nil, fmt.Errorf("StreamableHTTP type MCP server must specify URL")
 	}
 
-	// 准备客户端选项
+	// Prepare client options
 	var options []transport.StreamableHTTPCOption
 
-	// 添加请求头
+	// Add request headers
 	if len(serverConfig.Headers) > 0 {
 		options = append(options, transport.WithHTTPHeaders(serverConfig.Headers))
 	}
 
-	// 设置默认超时时间
+	// Set default timeout
 	options = append(options, transport.WithHTTPTimeout(30*time.Second))
 
-	// 创建StreamableHTTP客户端
+	// Create StreamableHTTP client
 	client, err := client.NewStreamableHttpClient(serverConfig.URL, options...)
 	if err != nil {
-		return nil, fmt.Errorf("创建StreamableHTTP MCP客户端失败: %w", err)
+		return nil, fmt.Errorf("failed to create StreamableHTTP MCP client: %w", err)
 	}
 
 	return client, nil
 }
 
-// createSSEClient 创建SSE类型的MCP客户端
+// createSSEClient creates SSE type MCP client
 func (c *Client) createSSEClient(ctx context.Context, serverConfig config.MCPServer) (*client.Client, error) {
 	if serverConfig.URL == "" {
-		return nil, fmt.Errorf("SSE类型的MCP服务器必须指定URL")
+		return nil, fmt.Errorf("SSE type MCP server must specify URL")
 	}
 
-	// 验证URL格式
+	// Validate URL format
 	if _, err := url.Parse(serverConfig.URL); err != nil {
-		return nil, fmt.Errorf("无效的SSE服务器URL: %w", err)
+		return nil, fmt.Errorf("invalid SSE server URL: %w", err)
 	}
 
-	// 准备客户端选项
+	// Prepare client options
 	var options []transport.ClientOption
 	if len(serverConfig.Headers) > 0 {
 		options = append(options, transport.WithHeaders(serverConfig.Headers))
 	}
 
-	// 创建SSE客户端
+	// Create SSE client
 	mcpClient, err := client.NewSSEMCPClient(serverConfig.URL, options...)
 	if err != nil {
-		return nil, fmt.Errorf("创建SSE MCP客户端失败: %w", err)
+		return nil, fmt.Errorf("failed to create SSE MCP client: %w", err)
 	}
 
 	return mcpClient, nil

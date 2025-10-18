@@ -14,7 +14,7 @@ import (
 	"github.com/tk103331/eino-cli/tools"
 )
 
-// AgentApp Agent应用结构
+// AgentApp represents the Agent application structure
 type AgentApp struct {
 	agentName string
 	program   *tea.Program
@@ -23,7 +23,7 @@ type AgentApp struct {
 	ctx       context.Context
 }
 
-// ChatApp 聊天应用结构（从chat功能合并而来）
+// ChatApp represents the chat application structure (merged from chat functionality)
 type ChatApp struct {
 	modelFactory *models.Factory
 	agentFactory *agent.Factory
@@ -36,26 +36,26 @@ type ChatApp struct {
 	reactAgent   agent.Agent
 }
 
-// NewAgentApp 创建新的Agent应用
+// NewAgentApp creates a new Agent application
 func NewAgentApp(agentName string) (*AgentApp, error) {
 	cfg := config.GetConfig()
 	if cfg == nil {
-		return nil, fmt.Errorf("全局配置未初始化")
+		return nil, fmt.Errorf("global configuration not initialized")
 	}
 
-	// 检查Agent配置是否存在
+	// Check if Agent configuration exists
 	_, ok := cfg.Agents[agentName]
 	if !ok {
-		return nil, fmt.Errorf("Agent配置不存在: %s", agentName)
+		return nil, fmt.Errorf("Agent configuration does not exist: %s", agentName)
 	}
 
-	// 创建Agent工厂
+	// Create Agent factory
 	factory := agent.NewFactory(cfg)
 
-	// 创建Agent实例
+	// Create Agent instance
 	agentInstance, err := factory.CreateAgent(agentName)
 	if err != nil {
-		return nil, fmt.Errorf("创建Agent失败: %v", err)
+		return nil, fmt.Errorf("failed to create Agent: %v", err)
 	}
 
 	app := &AgentApp{
@@ -64,17 +64,17 @@ func NewAgentApp(agentName string) (*AgentApp, error) {
 		ctx:       context.Background(),
 	}
 
-	// 创建Agent模型，传入发送消息的回调函数
+	// Create Agent model, passing in the callback function for sending messages
 	agentModel := NewViewModel(app.sendMessage)
 	app.model = agentModel
 
-	// 创建Bubble Tea程序
+	// Create Bubble Tea program
 	app.program = tea.NewProgram(*agentModel, tea.WithAltScreen())
 
 	return app, nil
 }
 
-// NewChatApp 创建新的聊天应用（从chat功能合并而来）
+// NewChatApp creates a new chat application (merged from chat functionality)
 func NewChatApp(modelName string, tools []string, system string) *ChatApp {
 	cfg := config.GetConfig()
 	factory := models.NewFactory(cfg)
@@ -88,65 +88,65 @@ func NewChatApp(modelName string, tools []string, system string) *ChatApp {
 		system:       system,
 	}
 
-	// 创建聊天模型，传入发送消息的回调函数
+	// Create chat model, passing in the callback function for sending messages
 	chatModel := NewViewModel(app.sendMessage)
 	app.model = chatModel
 
-	// 创建Bubble Tea程序
+	// Create Bubble Tea program
 	app.program = tea.NewProgram(*chatModel, tea.WithAltScreen())
 
 	return app
 }
 
-// Run 运行Agent应用
+// Run runs the Agent application
 func (app *AgentApp) Run() error {
 	_, err := app.program.Run()
 	return err
 }
 
-// Run 运行Chat应用（从chat功能合并而来）
+// Run runs the Chat application (merged from chat functionality)
 func (app *ChatApp) Run() error {
 	_, err := app.program.Run()
 	return err
 }
 
-// sendMessage 发送消息给AI
+// sendMessage sends a message to AI
 func (app *AgentApp) sendMessage(message string) error {
-	// 获取Agent配置
+	// Get Agent configuration
 	cfg := config.GetConfig()
 	agentConfig := cfg.Agents[app.agentName]
 
-	// 构建消息列表
+	// Build message list
 	var messages []*schema.Message
 
-	// 添加系统消息（如果有）
+	// Add system message (if any)
 	if agentConfig.System != "" {
 		messages = append(messages, schema.SystemMessage(agentConfig.System))
 	}
 
-	// 添加用户消息
+	// Add user message
 	messages = append(messages, schema.UserMessage(message))
 
-	// 在goroutine中处理对话，避免阻塞UI
+	// Handle conversation in goroutine to avoid blocking UI
 	go app.processConversation(messages)
 
 	return nil
 }
 
-// sendMessage 发送消息给AI模型（ChatApp用）
+// sendMessage sends a message to AI model (for ChatApp use)
 func (app *ChatApp) sendMessage(message string) error {
-	// 如果有工具配置，使用ReactAgent的ChatWithCallback方法
+	// If there are tool configurations, use ReactAgent's ChatWithCallback method
 	if len(app.tools) > 0 {
 		return app.sendMessageWithAgent(message)
 	}
 
-	// 否则使用原有的模型直接调用方式
+	// Otherwise use the original model direct call method
 	return app.sendMessageWithModel(message)
 }
 
-// processConversation 处理对话（使用流式输出）
+// processConversation handles conversation (using streaming output)
 func (app *AgentApp) processConversation(messages []*schema.Message) {
-	// 获取最后一条用户消息作为prompt
+	// Get the last user message as prompt
 	var prompt string
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == schema.User {
@@ -156,18 +156,18 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 	}
 
 	if prompt == "" {
-		app.program.Send(ErrorMsg("未找到用户消息"))
+		app.program.Send(ErrorMsg("User message not found"))
 		return
 	}
 
-	// 创建工具调用回调函数
+	// Create tool call callback function
 	toolCallback := func(msg interface{}) {
 		switch v := msg.(type) {
 		case struct {
 			Name      string
 			Arguments string
 		}:
-			// 只发送真正的工具调用，过滤内部组件
+			// Only send real tool calls, filter internal components
 			if !isInternalComponent(v.Name) {
 				app.program.Send(ToolStartMsg{
 					Name:      v.Name,
@@ -178,7 +178,7 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 			Name   string
 			Result string
 		}:
-			// 只发送真正的工具调用结果，过滤内部组件
+			// Only send real tool call results, filter internal components
 			if !isInternalComponent(v.Name) {
 				app.program.Send(ToolEndMsg{
 					Name:   v.Name,
@@ -192,7 +192,7 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 		}
 	}
 
-	// 创建流式内容回调函数
+	// Create streaming content callback function
 	chunkCallback := func(chunk *agent.StreamChunk) {
 		switch chunk.Type {
 		case "content":
@@ -206,16 +206,16 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 		}
 	}
 
-	// 使用Agent的ChatStream方法进行流式对话
+	// Use Agent's ChatStream method for streaming conversation
 	err := app.agent.ChatStream(app.ctx, prompt, chunkCallback, toolCallback)
 	if err != nil {
-		app.program.Send(ErrorMsg(fmt.Sprintf("AI响应错误: %v", err)))
+		app.program.Send(ErrorMsg(fmt.Sprintf("AI response error: %v", err)))
 	}
 }
 
-// sendMessageWithAgent 使用ReactAgent发送消息，支持工具调用回调（ChatApp用）
+// sendMessageWithAgent sends messages using ReactAgent, supporting tool call callbacks (for ChatApp use)
 func (app *ChatApp) sendMessageWithAgent(message string) error {
-	// 创建临时Agent配置
+	// Create temporary Agent configuration
 	if app.reactAgent == nil {
 		agentConfig := config.Agent{
 			System: app.system,
@@ -223,27 +223,27 @@ func (app *ChatApp) sendMessageWithAgent(message string) error {
 			Tools:  app.tools,
 		}
 
-		// 创建ReactAgent实例
+		// Create ReactAgent instance
 		reactAgent := agent.NewReactAgent("temp_chat_agent", &agentConfig)
 		if err := reactAgent.Init(); err != nil {
-			app.program.Send(ErrorMsg(fmt.Sprintf("初始化Agent失败: %v", err)))
+			app.program.Send(ErrorMsg(fmt.Sprintf("Failed to initialize Agent: %v", err)))
 			return err
 		}
 		app.reactAgent = reactAgent
 	}
 
-	// 在后台运行Agent并获取响应
+	// Run Agent in background and get response
 	go func() {
 		ctx := context.Background()
 
-		// 创建工具调用回调函数
+		// Create tool call callback function
 		callback := func(data interface{}) {
 			switch v := data.(type) {
 			case string:
-				// 流式内容
+				// Streaming content
 				app.program.Send(StreamChunkMsg(v))
 			case map[string]interface{}:
-				// 工具调用信息
+				// Tool call information
 				if toolType, ok := v["type"].(string); ok {
 					switch toolType {
 					case "tool_start":
@@ -275,7 +275,7 @@ func (app *ChatApp) sendMessageWithAgent(message string) error {
 					case "tool_error":
 						if toolName, ok := v["tool_name"].(string); ok {
 							if errorMsg, ok := v["error"].(string); ok {
-								app.program.Send(ErrorMsg(fmt.Sprintf("工具 %s 执行错误: %s", toolName, errorMsg)))
+								app.program.Send(ErrorMsg(fmt.Sprintf("Tool %s execution error: %s", toolName, errorMsg)))
 							}
 						}
 					}
@@ -283,14 +283,14 @@ func (app *ChatApp) sendMessageWithAgent(message string) error {
 			}
 		}
 
-		// 使用Agent的ChatWithCallback方法生成响应
+		// Use Agent's ChatWithCallback method to generate response
 		response, err := app.reactAgent.ChatWithCallback(ctx, message, callback)
 		if err != nil {
-			app.program.Send(ErrorMsg(fmt.Sprintf("AI响应错误: %v", err)))
+			app.program.Send(ErrorMsg(fmt.Sprintf("AI response error: %v", err)))
 			return
 		}
 
-		// 发送完整响应
+		// Send complete response
 		if response != "" {
 			app.program.Send(ResponseMsg(response))
 		}
@@ -299,32 +299,32 @@ func (app *ChatApp) sendMessageWithAgent(message string) error {
 	return nil
 }
 
-// sendMessageWithModel 使用原有的模型直接调用方式发送消息（ChatApp用）
+// sendMessageWithModel sends messages using the original model direct call method (for ChatApp use)
 func (app *ChatApp) sendMessageWithModel(message string) error {
-	// 创建模型实例（如果还没有创建）
+	// Create model instance (if not created yet)
 	if app.chatModel == nil {
 		ctx := context.Background()
 		chatModel, err := app.modelFactory.CreateChatModel(ctx, app.modelName)
 		if err != nil {
-			// 发送错误消息到UI
-			app.program.Send(ErrorMsg(fmt.Sprintf("创建Model失败: %v", err)))
+			// Send error message to UI
+			app.program.Send(ErrorMsg(fmt.Sprintf("Failed to create Model: %v", err)))
 			return err
 		}
 
-		// 如果指定了工具，则使用WithTools方法加载工具
+		// If tools are specified, use WithTools method to load tools
 		if len(app.tools) > 0 {
 			toolInstances, err := app.createTools()
 			if err != nil {
-				app.program.Send(ErrorMsg(fmt.Sprintf("创建工具失败: %v", err)))
+				app.program.Send(ErrorMsg(fmt.Sprintf("Failed to create tools: %v", err)))
 				return err
 			}
 
-			// 将 InvokableTool 转换为 ToolInfo
+			// Convert InvokableTool to ToolInfo
 			var toolInfos []*schema.ToolInfo
 			for _, tool := range toolInstances {
 				info, err := tool.Info(context.Background())
 				if err != nil {
-					app.program.Send(ErrorMsg(fmt.Sprintf("获取工具信息失败: %v", err)))
+					app.program.Send(ErrorMsg(fmt.Sprintf("Failed to get tool information: %v", err)))
 					return err
 				}
 				toolInfos = append(toolInfos, info)
@@ -332,7 +332,7 @@ func (app *ChatApp) sendMessageWithModel(message string) error {
 
 			chatModel, err = chatModel.WithTools(toolInfos)
 			if err != nil {
-				app.program.Send(ErrorMsg(fmt.Sprintf("设置工具失败: %v", err)))
+				app.program.Send(ErrorMsg(fmt.Sprintf("Failed to set up tools: %v", err)))
 				return err
 			}
 		}
@@ -340,40 +340,40 @@ func (app *ChatApp) sendMessageWithModel(message string) error {
 		app.chatModel = chatModel
 	}
 
-	// 在后台运行模型并获取流式响应
+	// Run model in background and get streaming response
 	go func() {
 		ctx := context.Background()
 
-		// 创建消息列表，包含可选的system提示
+		// Create message list, including optional system prompt
 		var messages []*schema.Message
 		if app.system != "" {
 			messages = append(messages, schema.SystemMessage(app.system))
 		}
 		messages = append(messages, schema.UserMessage(message))
 
-		// 开始对话循环，处理工具调用
+		// Start conversation loop, handling tool calls
 		app.processConversation(ctx, messages)
 	}()
 
 	return nil
 }
 
-// processConversation 处理对话循环，包括工具调用（ChatApp用）
+// processConversation handles conversation loop, including tool calls (for ChatApp use)
 func (app *ChatApp) processConversation(ctx context.Context, messages []*schema.Message) {
-	maxIterations := 10 // 防止无限循环
+	maxIterations := 10 // Prevent infinite loops
 	iteration := 0
 
 	for iteration < maxIterations {
 		iteration++
 
-		// 调用Model的Stream方法获取流式响应
+		// Call Model's Stream method to get streaming response
 		streamReader, err := app.chatModel.Stream(ctx, messages)
 		if err != nil {
-			app.program.Send(ErrorMsg(fmt.Sprintf("AI响应错误: %v", err)))
+			app.program.Send(ErrorMsg(fmt.Sprintf("AI response error: %v", err)))
 			return
 		}
 
-		// 处理流式响应
+		// Handle streaming response
 		var fullContent string
 		var assistantMessage *schema.Message
 		var allToolCalls []schema.ToolCall
@@ -381,59 +381,59 @@ func (app *ChatApp) processConversation(ctx context.Context, messages []*schema.
 		for {
 			chunk, err := streamReader.Recv()
 			if err != nil {
-				// 流结束或出错
+				// Stream ended or error occurred
 				if err.Error() != "EOF" && err.Error() != "io: read/write on closed pipe" {
-					app.program.Send(ErrorMsg(fmt.Sprintf("流式响应错误: %v", err)))
+					app.program.Send(ErrorMsg(fmt.Sprintf("Streaming response error: %v", err)))
 					streamReader.Close()
 					return
 				}
 				break
 			}
 
-			// 累积内容并发送增量更新
+			// Accumulate content and send incremental updates
 			fullContent += chunk.Content
 			app.program.Send(StreamChunkMsg(chunk.Content))
 
-			// 检查当前chunk是否包含工具调用
+			// Check if current chunk contains tool calls
 			if len(chunk.ToolCalls) > 0 {
-				// 累积所有工具调用
+				// Accumulate all tool calls
 				allToolCalls = append(allToolCalls, chunk.ToolCalls...)
 			}
 
-			// 保存完整的助手消息（包含可能的工具调用）
+			// Save complete assistant message (including possible tool calls)
 			assistantMessage = chunk
 		}
 		streamReader.Close()
 
-		// 如果累积了工具调用，将它们合并到最终的助手消息中
+		// If tool calls were accumulated, merge them into the final assistant message
 		if len(allToolCalls) > 0 && assistantMessage != nil {
 			assistantMessage.ToolCalls = allToolCalls
 		}
 
-		// 检查是否有工具调用
+		// Check if there are tool calls
 		if assistantMessage != nil && len(assistantMessage.ToolCalls) > 0 {
-			// 发送完整响应到UI（如果有内容）
+			// Send complete response to UI (if there is content)
 			if fullContent != "" {
 				app.program.Send(ResponseMsg(fullContent))
 			}
 
-			// 将助手消息添加到消息历史
+			// Add assistant message to message history
 			messages = append(messages, assistantMessage)
 
-			// 执行工具调用
+			// Execute tool calls
 			toolResults, err := app.executeToolCalls(ctx, assistantMessage.ToolCalls)
 			if err != nil {
-				app.program.Send(ErrorMsg(fmt.Sprintf("工具执行错误: %v", err)))
+				app.program.Send(ErrorMsg(fmt.Sprintf("Tool execution error: %v", err)))
 				return
 			}
 
-			// 将工具结果添加到消息历史
+			// Add tool results to message history
 			messages = append(messages, toolResults...)
 
-			// 继续下一轮对话
+			// Continue to next round of conversation
 			continue
 		} else {
-			// 没有工具调用，发送最终响应并结束
+			// No tool calls, send final response and end
 			if fullContent != "" {
 				app.program.Send(ResponseMsg(fullContent))
 			}
@@ -442,99 +442,99 @@ func (app *ChatApp) processConversation(ctx context.Context, messages []*schema.
 	}
 
 	if iteration >= maxIterations {
-		app.program.Send(ErrorMsg("达到最大迭代次数，停止对话"))
+		app.program.Send(ErrorMsg("Maximum iterations reached, stopping conversation"))
 	}
 }
 
-// executeToolCalls 执行工具调用（ChatApp用）
+// executeToolCalls executes tool calls (for ChatApp use)
 func (app *ChatApp) executeToolCalls(ctx context.Context, toolCalls []schema.ToolCall) ([]*schema.Message, error) {
-	// 创建工具实例映射
+	// Create tool instance mapping
 	toolInstances, err := app.createTools()
 	if err != nil {
-		return nil, fmt.Errorf("创建工具实例失败: %v", err)
+		return nil, fmt.Errorf("failed to create tool instances: %v", err)
 	}
 
-	// 创建工具名称到实例的映射
+	// Create tool name to instance mapping
 	toolMap := make(map[string]tool.InvokableTool)
 	for _, toolInstance := range toolInstances {
 		info, err := toolInstance.Info(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("获取工具信息失败: %v", err)
+			return nil, fmt.Errorf("failed to get tool information: %v", err)
 		}
 		toolMap[info.Name] = toolInstance
 	}
 
 	var toolMessages []*schema.Message
 
-	// 执行每个工具调用
+	// Execute each tool call
 	for _, toolCall := range toolCalls {
 		toolName := toolCall.Function.Name
 		arguments := toolCall.Function.Arguments
 		if toolName == "" {
 			continue
 		}
-		// 查找工具实例
+		// Find tool instance
 		toolInstance, exists := toolMap[toolName]
 		if !exists {
-			// 工具不存在，返回错误消息
-			errorMsg := fmt.Sprintf("工具 '%s' 不存在", toolName)
+			// Tool does not exist, return error message
+			errorMsg := fmt.Sprintf("Tool '%s' does not exist", toolName)
 			toolMessage := schema.ToolMessage(errorMsg, toolCall.ID, schema.WithToolName(toolName))
 			toolMessages = append(toolMessages, toolMessage)
 
-			// 显示工具不存在错误
-			app.program.Send(StreamChunkMsg(fmt.Sprintf("❌ 工具 '%s' 不存在\n", toolName)))
+			// Display tool not found error
+			app.program.Send(StreamChunkMsg(fmt.Sprintf("❌ Tool '%s' does not exist\n", toolName)))
 			continue
 		}
 
-		// 显示工具调用信息
-		app.program.Send(StreamChunkMsg(fmt.Sprintf("\n🔧 调用工具: %s\n参数: %s\n", toolName, arguments)))
+		// Display tool call information
+		app.program.Send(StreamChunkMsg(fmt.Sprintf("\n🔧 Calling tool: %s\nArguments: %s\n", toolName, arguments)))
 
-		// 执行工具
+		// Execute tool
 		result, err := toolInstance.InvokableRun(ctx, arguments)
 		if err != nil {
-			// 工具执行失败，返回错误消息
-			errorMsg := fmt.Sprintf("工具执行失败: %v", err)
+			// Tool execution failed, return error message
+			errorMsg := fmt.Sprintf("Tool execution failed: %v", err)
 			toolMessage := schema.ToolMessage(errorMsg, toolCall.ID, schema.WithToolName(toolName))
 			toolMessages = append(toolMessages, toolMessage)
 
-			// 显示工具执行错误
-			app.program.Send(StreamChunkMsg(fmt.Sprintf("❌ 工具执行失败: %v\n", err)))
+			// Display tool execution error
+			app.program.Send(StreamChunkMsg(fmt.Sprintf("❌ Tool execution failed: %v\n", err)))
 		} else {
-			// 工具执行成功，返回结果
+			// Tool execution succeeded, return result
 			toolMessage := schema.ToolMessage(result, toolCall.ID, schema.WithToolName(toolName))
 			toolMessages = append(toolMessages, toolMessage)
 
-			// 显示工具执行结果（限制长度以避免UI过于冗长）
+			// Display tool execution result (limit length to avoid UI being too verbose)
 			displayResult := result
 			if len(result) > 500 {
-				displayResult = result[:500] + "...(结果已截断)"
+				displayResult = result[:500] + "...(result truncated)"
 			}
-			app.program.Send(StreamChunkMsg(fmt.Sprintf("✅ 工具执行结果: %s\n", displayResult)))
+			app.program.Send(StreamChunkMsg(fmt.Sprintf("✅ Tool execution result: %s\n", displayResult)))
 		}
 	}
 
 	return toolMessages, nil
 }
 
-// createTools 创建工具实例（ChatApp用）
+// createTools creates tool instances (for ChatApp use)
 func (app *ChatApp) createTools() ([]tool.InvokableTool, error) {
 	cfg := config.GetConfig()
 	if cfg == nil {
-		return nil, fmt.Errorf("全局配置未初始化")
+		return nil, fmt.Errorf("global configuration not initialized")
 	}
 
 	var toolInstances []tool.InvokableTool
 	for _, toolName := range app.tools {
-		// 获取工具配置
+		// Get tool configuration
 		toolCfg, ok := cfg.Tools[toolName]
 		if !ok {
-			return nil, fmt.Errorf("工具配置不存在: %s", toolName)
+			return nil, fmt.Errorf("tool configuration does not exist: %s", toolName)
 		}
 
-		// 创建工具实例
+		// Create tool instance
 		toolInstance, err := tools.CreateTool(toolName, toolCfg)
 		if err != nil {
-			return nil, fmt.Errorf("创建工具 %s 失败: %v", toolName, err)
+			return nil, fmt.Errorf("failed to create tool %s: %v", toolName, err)
 		}
 
 		toolInstances = append(toolInstances, toolInstance)
@@ -543,7 +543,7 @@ func (app *ChatApp) createTools() ([]tool.InvokableTool, error) {
 	return toolInstances, nil
 }
 
-// isInternalComponent 判断是否为内部组件，不应显示给用户
+// isInternalComponent determines if it is an internal component that should not be displayed to users
 func isInternalComponent(name string) bool {
 	internalComponents := []string{
 		"ChatModel",
@@ -559,14 +559,14 @@ func isInternalComponent(name string) bool {
 	return false
 }
 
-// Stop 停止Agent应用
+// Stop stops the Agent application
 func (app *AgentApp) Stop() {
 	if app.program != nil {
 		app.program.Quit()
 	}
 }
 
-// Stop 停止Chat应用（从chat功能合并而来）
+// Stop stops the Chat application (merged from chat functionality)
 func (app *ChatApp) Stop() {
 	if app.program != nil {
 		app.program.Quit()
