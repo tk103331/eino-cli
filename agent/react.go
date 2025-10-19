@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/cloudwego/eino/callbacks"
@@ -27,6 +29,267 @@ type ReactAgent struct {
 	agentName string
 }
 
+// formatArguments formats tool arguments for better readability
+func formatArguments(args string) string {
+	// Try to parse as JSON first
+	var jsonArgs interface{}
+	if err := json.Unmarshal([]byte(args), &jsonArgs); err == nil {
+		if formatted, err := json.MarshalIndent(jsonArgs, "   ", "  "); err == nil {
+			return string(formatted)
+		}
+	}
+
+	// Handle Go struct format (e.g., &{key value key2 value2})
+	if strings.HasPrefix(args, "&{") {
+		return formatGoStruct(args)
+	}
+
+	// Handle map-like format
+	if strings.Contains(args, ":") && strings.Contains(args, "{") {
+		return formatMapLike(args)
+	}
+
+	// Clean up common formatting issues
+	cleaned := strings.ReplaceAll(args, "\n", " ")
+	cleaned = regexp.MustCompile(`\s+`).ReplaceAllString(cleaned, " ")
+	cleaned = strings.TrimSpace(cleaned)
+
+	// Truncate if still too long
+	if len(cleaned) > 300 {
+		return cleaned[:297] + "..."
+	}
+
+	return cleaned
+}
+
+// formatResult formats tool results for better readability
+func formatResult(result string) string {
+	// Clean up result first
+	cleaned := strings.TrimSpace(result)
+
+	// Handle JSON results
+	var jsonResult interface{}
+	if err := json.Unmarshal([]byte(cleaned), &jsonResult); err == nil {
+		if formatted, err := json.MarshalIndent(jsonResult, "   ", "  "); err == nil {
+			formattedStr := string(formatted)
+			if len(formattedStr) > 500 {
+				return formattedStr[:497] + "..."
+			}
+			return formattedStr
+		}
+	}
+
+	// Handle multiline results
+	lines := strings.Split(cleaned, "\n")
+	if len(lines) > 10 {
+		return strings.Join(lines[:10], "\n") + "\n... (truncated)"
+	}
+
+	// Truncate single line if too long
+	if len(cleaned) > 500 {
+		return cleaned[:497] + "..."
+	}
+
+	return cleaned
+}
+
+// formatGoStruct formats Go struct-like strings into readable format
+func formatGoStruct(structStr string) string {
+	// Remove &{ and }
+	content := strings.TrimPrefix(structStr, "&{")
+	content = strings.TrimSuffix(content, "}")
+
+	// Split by spaces and try to parse key-value pairs
+	parts := strings.Fields(content)
+	var result []string
+
+	for i := 0; i < len(parts); i++ {
+		part := parts[i]
+
+		// Skip memory addresses and pointers
+		if strings.HasPrefix(part, "0x") || len(part) == 14 && part[0] == '0' && part[1] == 'x' {
+			continue
+		}
+
+		// Skip empty brackets and special chars
+		if part == "[]" || part == "<nil>" || part == "map[]" {
+			continue
+		}
+
+		// Clean up the part
+		if strings.Contains(part, ":") {
+			result = append(result, part)
+		} else if i+1 < len(parts) && !strings.HasPrefix(parts[i+1], "0x") {
+			// Assume it's a key-value pair
+			result = append(result, part+": "+parts[i+1])
+			i++ // Skip next part as it's the value
+		} else {
+			result = append(result, part)
+		}
+	}
+
+	formatted := strings.Join(result, ", ")
+	if len(formatted) > 300 {
+		return formatted[:297] + "..."
+	}
+	return formatted
+}
+
+// formatMapLike formats map-like strings into readable format
+func formatMapLike(mapStr string) string {
+	// Try to extract key-value pairs
+	re := regexp.MustCompile(`(\w+):\s*([^{,}\[\]]+)|(\w+):\s*\{([^}]*)\}`)
+	matches := re.FindAllStringSubmatch(mapStr, -1)
+
+	var result []string
+	for _, match := range matches {
+		if match[1] != "" { // Simple key: value
+			key := match[1]
+			value := strings.TrimSpace(match[2])
+			result = append(result, key+": "+value)
+		} else if match[3] != "" { // key: {complex}
+			key := match[3]
+			value := strings.TrimSpace(match[4])
+			if value != "" {
+				result = append(result, key+": {"+value+"}")
+			} else {
+				result = append(result, key+": {}")
+			}
+		}
+	}
+
+	if len(result) > 0 {
+		formatted := "{ " + strings.Join(result, ", ") + " }"
+		if len(formatted) > 300 {
+			return formatted[:297] + "..."
+		}
+		return formatted
+	}
+
+	// Fallback: clean up the original string
+	cleaned := regexp.MustCompile(`\s+`).ReplaceAllString(mapStr, " ")
+	cleaned = strings.TrimSpace(cleaned)
+	if len(cleaned) > 300 {
+		return cleaned[:297] + "..."
+	}
+	return cleaned
+}
+
+// formatGeneralInfo formats general callback information
+func formatGeneralInfo(info string) string {
+	// Skip empty or memory address info
+	if info == "" || regexp.MustCompile(`^0x[a-fA-F0-9]+$`).MatchString(info) {
+		return ""
+	}
+
+	// Handle ChatModel messages
+	if strings.Contains(info, "system:") && strings.Contains(info, "user:") {
+		return formatChatMessages(info)
+	}
+
+	// Handle tool call information
+	if strings.Contains(info, "tool_calls:") {
+		return formatToolCallInfo(info)
+	}
+
+	// Clean up and truncate
+	cleaned := strings.ReplaceAll(info, "\n", " ")
+	cleaned = regexp.MustCompile(`\s+`).ReplaceAllString(cleaned, " ")
+	cleaned = strings.TrimSpace(cleaned)
+
+	if len(cleaned) > 200 {
+		return cleaned[:197] + "..."
+	}
+
+	return cleaned
+}
+
+// formatChatMessages formats chat message information for ChatModel node
+func formatChatMessages(info string) string {
+	// For ChatModel node, we only want to show a simple indicator
+	// instead of the complex message content
+	return "🤖 Processing messages with model"
+}
+
+// formatToolCallInfo formats tool call information for Tools node
+func formatToolCallInfo(info string) string {
+	// Parse and format tool call information
+	if strings.Contains(info, "tool_calls:") {
+		return formatToolCalls(info)
+	}
+
+	return truncateString(info, 150)
+}
+
+// formatToolCalls extracts and formats individual tool calls
+func formatToolCalls(info string) string {
+	// Look for tool call patterns in the response
+	lines := strings.Split(info, "\n")
+	var result []string
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "tool_calls:") {
+			result = append(result, "🔧 Processing tool calls...")
+		} else if strings.Contains(line, "Function:{Name:") {
+			// Extract tool name
+			if start := strings.Index(line, "Name:"); start != -1 {
+				nameStart := start + 5
+				if end := strings.Index(line[nameStart:], " "); end != -1 {
+					toolName := line[nameStart : nameStart+end]
+					result = append(result, fmt.Sprintf("   📋 Tool: %s", toolName))
+				}
+			}
+		} else if strings.Contains(line, "Arguments:") {
+			// Extract tool arguments
+			if start := strings.Index(line, "Arguments:"); start != -1 {
+				args := line[start+11:]
+				args = strings.TrimSpace(args)
+				if args == "{}" {
+					result = append(result, "   📝 Arguments: (none)")
+				} else {
+					result = append(result, fmt.Sprintf("   📝 Arguments: %s", args))
+				}
+			}
+		} else if strings.Contains(line, "finish_reason:") {
+			// Extract finish reason
+			if start := strings.Index(line, "finish_reason:"); start != -1 {
+				reason := strings.TrimSpace(line[start+14:])
+				if reason == "tool_calls" {
+					result = append(result, "   ✅ Reason: Tool calls completed")
+				} else if reason == "stop" {
+					result = append(result, "   ✅ Reason: Response completed")
+				} else {
+					result = append(result, fmt.Sprintf("   ✅ Reason: %s", reason))
+				}
+			}
+		}
+	}
+
+	if len(result) == 0 {
+		return "🔧 Tool calls detected in response"
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// truncateString truncates a string to the specified length
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}
+
+// ToolCallInfo represents structured tool call information
+type ToolCallInfo struct {
+	Type      string // "start", "end", "error"
+	Name      string
+	Arguments string
+	Result    string
+	Error     string
+}
+
 // ToolCallCallback custom callback handler for capturing tool call information
 type ToolCallCallback struct {
 	callback func(interface{})
@@ -35,13 +298,17 @@ type ToolCallCallback struct {
 // OnStart callback when node starts
 func (t *ToolCallCallback) OnStart(ctx context.Context, info *callbacks.RunInfo, input callbacks.CallbackInput) context.Context {
 	if t.callback != nil && info.Name != "" {
-		// Send tool start call information
-		t.callback(struct {
-			Name      string
-			Arguments string
-		}{
+		// Format arguments for better readability
+		args := fmt.Sprintf("%v", input)
+		if len(args) > 200 {
+			args = args[:197] + "..."
+		}
+
+		// Send structured tool start information
+		t.callback(ToolCallInfo{
+			Type:      "start",
 			Name:      info.Name,
-			Arguments: fmt.Sprintf("%v", input),
+			Arguments: args,
 		})
 	}
 	return ctx
@@ -50,13 +317,17 @@ func (t *ToolCallCallback) OnStart(ctx context.Context, info *callbacks.RunInfo,
 // OnEnd callback when node ends
 func (t *ToolCallCallback) OnEnd(ctx context.Context, info *callbacks.RunInfo, output callbacks.CallbackOutput) context.Context {
 	if t.callback != nil && info.Name != "" {
-		// Send tool execution completion information
-		t.callback(struct {
-			Name   string
-			Result string
-		}{
+		// Format result for better readability
+		result := fmt.Sprintf("%v", output)
+		if len(result) > 200 {
+			result = result[:197] + "..."
+		}
+
+		// Send structured tool completion information
+		t.callback(ToolCallInfo{
+			Type:   "end",
 			Name:   info.Name,
-			Result: fmt.Sprintf("%v", output),
+			Result: result,
 		})
 	}
 	return ctx
@@ -65,8 +336,12 @@ func (t *ToolCallCallback) OnEnd(ctx context.Context, info *callbacks.RunInfo, o
 // OnError callback when node encounters error
 func (t *ToolCallCallback) OnError(ctx context.Context, info *callbacks.RunInfo, err error) context.Context {
 	if t.callback != nil && info.Name != "" {
-		// Send callback for any named node error
-		t.callback(fmt.Sprintf("tool %s execution error: %v", info.Name, err))
+		// Send structured error information
+		t.callback(ToolCallInfo{
+			Type:  "error",
+			Name:  info.Name,
+			Error: err.Error(),
+		})
 	}
 	return ctx
 }
@@ -121,7 +396,7 @@ func (r *ReactAgent) Init() error {
 	return nil
 }
 
-// Run runs Agent
+// Run runs Agent with optimized output formatting
 func (r *ReactAgent) Run(prompt string) error {
 	if r.agent == nil {
 		if err := r.Init(); err != nil {
@@ -129,23 +404,69 @@ func (r *ReactAgent) Run(prompt string) error {
 		}
 	}
 
-	// Create user message
-	messages := []*schema.Message{
-		schema.SystemMessage(r.config.System),
-		schema.UserMessage(prompt),
-	}
-
-	// Use react.Generate method to generate response
-	response, err := r.agent.Generate(r.ctx, messages)
-	if err != nil {
-		return fmt.Errorf("failed to run Agent: %w", err)
-	}
-
-	if response.Content != "" {
-		fmt.Print(response.Content)
-	}
-	fmt.Println()
-	return nil
+	// Use ChatStream method with optimized output formatting
+	return r.ChatStream(r.ctx, prompt, func(chunk *StreamChunk) {
+		switch chunk.Type {
+		case "content":
+			if chunk.Content != "" {
+				fmt.Print(chunk.Content)
+			} else {
+				// Empty content marks the end of the stream
+				fmt.Println()
+			}
+		case "tool_start":
+			fmt.Printf("\n🔧 Using tool: %s\n", chunk.Tool)
+		case "tool_end":
+			fmt.Printf("✅ Tool completed: %s\n", chunk.Tool)
+		case "error":
+			fmt.Printf("\n❌ Error: %s\n", chunk.Content)
+		}
+	}, func(toolInfo interface{}) {
+		// Show detailed tool information with optimized formatting
+		switch info := toolInfo.(type) {
+		case ToolCallInfo:
+			switch info.Type {
+			case "start":
+				// Handle different node types with specialized formatting
+				if info.Name == "ChatModel" {
+					fmt.Printf("   🤖 Processing with ChatModel\n")
+				} else if info.Name == "Tools" {
+					fmt.Printf("   🔧 Processing tool calls\n")
+				} else {
+					// Regular tool calls
+					fmt.Printf("   📋 %s\n", info.Name)
+					if info.Arguments != "" {
+						// Format arguments for better readability
+						formattedArgs := formatArguments(info.Arguments)
+						fmt.Printf("   📝 Arguments: %s\n", formattedArgs)
+					}
+				}
+			case "end":
+				if info.Name == "ChatModel" {
+					fmt.Printf("   ✅ ChatModel response generated\n")
+				} else if info.Name == "Tools" {
+					fmt.Printf("   ✅ Tool calls processed\n")
+				} else {
+					// Regular tool results
+					if info.Result != "" {
+						// Format result for better readability
+						formattedResult := formatResult(info.Result)
+						fmt.Printf("   📊 Result: %s\n", formattedResult)
+					} else {
+						fmt.Printf("   ✅ Completed successfully\n")
+					}
+				}
+			case "error":
+				fmt.Printf("   ❌ Error: %s\n", info.Error)
+			}
+		default:
+			// Format general callback information
+			formattedInfo := formatGeneralInfo(fmt.Sprintf("%v", info))
+			if formattedInfo != "" {
+				fmt.Printf("   ℹ️  %s\n", formattedInfo)
+			}
+		}
+	})
 }
 
 // Chat performs conversation, returns response content
