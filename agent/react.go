@@ -8,6 +8,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
@@ -17,6 +18,7 @@ import (
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 	"github.com/tk103331/eino-cli/config"
+	"github.com/tk103331/eino-cli/logger"
 	"github.com/tk103331/eino-cli/mcp"
 	"github.com/tk103331/eino-cli/models"
 )
@@ -281,6 +283,78 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
+// looksLikeWeatherQuery attempts to identify if the argument looks like a weather query
+func looksLikeWeatherQuery(args string) bool {
+	// Common indicators of weather queries
+	weatherKeywords := []string{
+		"weather", "temperature", "forecast", "climate", "humid", "rain", "snow", "wind",
+		"celsius", "fahrenheit", "°C", "°F", "天气", "气温", "温度", "下雨", "晴天", "阴天",
+	}
+
+	// Chinese city names and common locations
+	locationPatterns := []string{
+		"北京", "上海", "广州", "深圳", "杭州", "南京", "武汉", "成都", "西安", "重庆",
+		"天津", "苏州", "青岛", "大连", "厦门", "Beijing", "Shanghai", "Guangzhou", "Shenzhen",
+	}
+
+	args = strings.ToLower(strings.TrimSpace(args))
+
+	// Check for weather keywords
+	for _, keyword := range weatherKeywords {
+		if strings.Contains(args, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+
+	// Check if it's just a city name (strong indicator for weather)
+	for _, city := range locationPatterns {
+		if strings.Contains(args, strings.ToLower(city)) {
+			return true
+		}
+	}
+
+	// Check if it's a Chinese location (ends with common Chinese location suffixes)
+	if strings.ContainsAny(args, "市省区县") && len(args) >= 2 {
+		return true
+	}
+
+	// Single Chinese characters that are likely locations
+	if len(args) <= 4 && isMostlyChinese(args) {
+		return true
+	}
+
+	return false
+}
+
+// looksLikeLocationQuery attempts to identify if the argument looks like a location query
+func looksLikeLocationQuery(args string) bool {
+	locationKeywords := []string{
+		"location", "address", "coordinate", "gps", "map", "where", "find", "search",
+		"地址", "位置", "坐标", "定位", "查找", "搜索",
+	}
+
+	args = strings.ToLower(strings.TrimSpace(args))
+
+	for _, keyword := range locationKeywords {
+		if strings.Contains(args, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isMostlyChinese checks if a string contains mostly Chinese characters
+func isMostlyChinese(s string) bool {
+	chineseCount := 0
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) {
+			chineseCount++
+		}
+	}
+	return len(s) > 0 && chineseCount >= len(s)/2
+}
+
 // ToolCallInfo represents structured tool call information
 type ToolCallInfo struct {
 	Type      string // "start", "end", "error"
@@ -297,6 +371,95 @@ type ToolCallCallback struct {
 
 // OnStart callback when node starts
 func (t *ToolCallCallback) OnStart(ctx context.Context, info *callbacks.RunInfo, input callbacks.CallbackInput) context.Context {
+	logger.Debug("AGENT", fmt.Sprintf("Callback OnStart: name=%s, input_type=%T", info.Name, input))
+
+	// Special handling for Tools node to inspect what tools are being called
+	if info.Name == "Tools" {
+		if msg, ok := input.(*schema.Message); ok {
+			logger.Info("AGENT", fmt.Sprintf("Tools node processing message with %d tool calls", len(msg.ToolCalls)))
+			for i, tc := range msg.ToolCalls {
+				logger.Info("AGENT", fmt.Sprintf("Tools node - Tool call #%d: %s", i+1, tc.Function.Name))
+				logger.Debug("AGENT", fmt.Sprintf("Tools node - Tool call #%d struct: %+v", i+1, tc))
+				logger.Debug("AGENT", fmt.Sprintf("Tools node - Tool call #%d ID: %s", i+1, tc.ID))
+				logger.Debug("AGENT", fmt.Sprintf("Tools node - Tool call #%d Function struct: %+v", i+1, tc.Function))
+				if tc.Function.Arguments != "" {
+					logger.Debug("AGENT", fmt.Sprintf("Tools node - Tool call #%d args: %s", i+1, tc.Function.Arguments))
+				}
+
+				// Send individual tool call start callback to UI
+				toolName := tc.Function.Name
+				if toolName == "" {
+					// Try to extract tool name from ID or arguments as fallback
+					if tc.ID != "" {
+						toolName = tc.ID
+						logger.Debug("AGENT", fmt.Sprintf("Using ID as tool name fallback: %s", toolName))
+					} else if tc.Function.Arguments != "" {
+						// Try to parse arguments as JSON to see if tool name is embedded
+						var argsMap map[string]interface{}
+						if err := json.Unmarshal([]byte(tc.Function.Arguments), &argsMap); err == nil {
+							// Look for common tool name fields
+							if name, ok := argsMap["name"].(string); ok && name != "" {
+								toolName = name
+								logger.Debug("AGENT", fmt.Sprintf("Extracted tool name from arguments: %s", toolName))
+							} else if tool, ok := argsMap["tool"].(string); ok && tool != "" {
+								toolName = tool
+								logger.Debug("AGENT", fmt.Sprintf("Extracted tool from arguments: %s", toolName))
+							} else if funcName, ok := argsMap["function_name"].(string); ok && funcName != "" {
+								toolName = funcName
+								logger.Debug("AGENT", fmt.Sprintf("Extracted function_name from arguments: %s", toolName))
+							} else if funcName, ok := argsMap["function"].(string); ok && funcName != "" {
+								toolName = funcName
+								logger.Debug("AGENT", fmt.Sprintf("Extracted function from arguments: %s", toolName))
+							} else {
+								// Check if there's a nested structure
+								if nested, ok := argsMap["function"].(map[string]interface{}); ok {
+									if name, ok := nested["name"].(string); ok && name != "" {
+										toolName = name
+										logger.Debug("AGENT", fmt.Sprintf("Extracted nested function name: %s", toolName))
+									}
+								}
+								if toolName == "" {
+									toolName = "unknown_tool"
+									logger.Warn("AGENT", "Tool name is empty and couldn't extract from arguments")
+								}
+							}
+						} else {
+							// Arguments are not valid JSON, try to infer from context
+							argsStr := tc.Function.Arguments
+							logger.Debug("AGENT", fmt.Sprintf("Arguments are not JSON, raw content: %s", argsStr))
+
+							// Check if this looks like a weather query (city name, location, etc.)
+							if looksLikeWeatherQuery(argsStr) {
+								toolName = "get_weather"
+								logger.Info("AGENT", "Inferred 'get_weather' from weather-like query")
+							} else if looksLikeLocationQuery(argsStr) {
+								toolName = "get_location"
+								logger.Info("AGENT", "Inferred 'get_location' from location-like query")
+							} else {
+								toolName = "unknown_tool"
+								logger.Warn("AGENT", "Tool name is empty and couldn't infer from arguments")
+							}
+						}
+					} else {
+						toolName = "unknown_tool"
+						logger.Warn("AGENT", "Tool name is empty, using 'unknown_tool' fallback")
+					}
+				}
+
+				if t.callback != nil && toolName != "" {
+					logger.Debug("AGENT", fmt.Sprintf("Sending individual tool start callback for: %s", toolName))
+					t.callback(ToolCallInfo{
+						Type:      "start",
+						Name:      toolName,
+						Arguments: tc.Function.Arguments,
+					})
+				}
+			}
+		} else {
+			logger.Debug("AGENT", fmt.Sprintf("Tools node received input type: %T", input))
+		}
+	}
+
 	if t.callback != nil && info.Name != "" {
 		// Format arguments for better readability
 		args := fmt.Sprintf("%v", input)
@@ -304,6 +467,7 @@ func (t *ToolCallCallback) OnStart(ctx context.Context, info *callbacks.RunInfo,
 			args = args[:197] + "..."
 		}
 
+		logger.Debug("AGENT", fmt.Sprintf("Sending callback for %s start", info.Name))
 		// Send structured tool start information
 		t.callback(ToolCallInfo{
 			Type:      "start",
@@ -316,6 +480,23 @@ func (t *ToolCallCallback) OnStart(ctx context.Context, info *callbacks.RunInfo,
 
 // OnEnd callback when node ends
 func (t *ToolCallCallback) OnEnd(ctx context.Context, info *callbacks.RunInfo, output callbacks.CallbackOutput) context.Context {
+	logger.Debug("AGENT", fmt.Sprintf("Callback OnEnd: name=%s, output_type=%T", info.Name, output))
+
+	// Special handling for Tools node - log completion but don't send generic callback
+	// Individual tool results will be handled through the streaming process or separate callbacks
+	if info.Name == "Tools" {
+		if msg, ok := output.(*schema.Message); ok {
+			logger.Info("AGENT", fmt.Sprintf("Tools node completed processing"))
+			logger.Debug("AGENT", fmt.Sprintf("Tools node output type: %T, content_len: %d",
+				output, len(msg.Content)))
+		} else {
+			logger.Debug("AGENT", fmt.Sprintf("Tools node output type: %T", output))
+		}
+		// Don't send the generic "Tools" completion callback to avoid cluttering the UI
+		// Individual tool callbacks are sent from the OnStart method
+		return ctx
+	}
+
 	if t.callback != nil && info.Name != "" {
 		// Format result for better readability
 		result := fmt.Sprintf("%v", output)
@@ -323,6 +504,7 @@ func (t *ToolCallCallback) OnEnd(ctx context.Context, info *callbacks.RunInfo, o
 			result = result[:197] + "..."
 		}
 
+		logger.Debug("AGENT", fmt.Sprintf("Sending callback for %s end", info.Name))
 		// Send structured tool completion information
 		t.callback(ToolCallInfo{
 			Type:   "end",
@@ -562,22 +744,34 @@ func (r *ReactAgent) ChatStream(ctx context.Context, prompt string, chunkCallbac
 		schema.UserMessage(prompt),
 	}
 
+	// Log the messages for debugging
+	logger.Info("AGENT", "Starting ChatStream with messages:")
+	logger.Debug("AGENT", fmt.Sprintf("System prompt: %s", r.config.System))
+	logger.Debug("AGENT", fmt.Sprintf("User prompt: %s", prompt))
+
 	// Create tool call callback handler
 	var toolCallCallback *ToolCallCallback
 	if toolCallback != nil {
 		toolCallCallback = &ToolCallCallback{callback: toolCallback}
+		logger.Debug("AGENT", "Tool callback configured")
+	} else {
+		logger.Debug("AGENT", "No tool callback provided")
 	}
 
 	// Use Stream method for streaming call
 	var sr *schema.StreamReader[*schema.Message]
 	var err error
 
+	logger.Info("AGENT", "Calling agent.Stream method")
 	if toolCallCallback != nil {
+		logger.Debug("AGENT", "Using stream with callbacks")
 		sr, err = r.agent.Stream(ctx, messages, agent.WithComposeOptions(compose.WithCallbacks(toolCallCallback)))
 	} else {
+		logger.Debug("AGENT", "Using stream without callbacks")
 		sr, err = r.agent.Stream(ctx, messages)
 	}
 	if err != nil {
+		logger.Error("AGENT", fmt.Sprintf("Stream call failed: %v", err))
 		if chunkCallback != nil {
 			chunkCallback(&StreamChunk{
 				Type:    "error",
@@ -588,11 +782,15 @@ func (r *ReactAgent) ChatStream(ctx context.Context, prompt string, chunkCallbac
 	}
 	defer sr.Close()
 
+	logger.Info("AGENT", "Stream call successful, starting to read messages")
+
 	// Read streaming response
+	messageCount := 0
 	for {
 		msg, err := sr.Recv()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				logger.Info("AGENT", fmt.Sprintf("Stream ended after receiving %d messages", messageCount))
 				// Stream ends, send end marker
 				if chunkCallback != nil {
 					chunkCallback(&StreamChunk{
@@ -602,6 +800,7 @@ func (r *ReactAgent) ChatStream(ctx context.Context, prompt string, chunkCallbac
 				}
 				break
 			}
+			logger.Error("AGENT", fmt.Sprintf("Failed to receive stream message: %v", err))
 			if chunkCallback != nil {
 				chunkCallback(&StreamChunk{
 					Type:    "error",
@@ -609,6 +808,24 @@ func (r *ReactAgent) ChatStream(ctx context.Context, prompt string, chunkCallbac
 				})
 			}
 			return fmt.Errorf("failed to receive stream message: %w", err)
+		}
+
+		messageCount++
+		logger.Debug("AGENT", fmt.Sprintf("Received message #%d: role=%s, tool_calls=%d, content_len=%d",
+			messageCount, msg.Role, len(msg.ToolCalls), len(msg.Content)))
+
+		// Log if message contains tool calls
+		if len(msg.ToolCalls) > 0 {
+			logger.Info("AGENT", fmt.Sprintf("Message contains %d tool calls", len(msg.ToolCalls)))
+			for i, tc := range msg.ToolCalls {
+				logger.Info("AGENT", fmt.Sprintf("Tool call #%d: name='%s', args_len=%d", i+1, tc.Function.Name, len(tc.Function.Arguments)))
+				logger.Debug("AGENT", fmt.Sprintf("Tool call #%d full struct: %+v", i+1, tc))
+				logger.Debug("AGENT", fmt.Sprintf("Tool call #%d ID: %s", i+1, tc.ID))
+				logger.Debug("AGENT", fmt.Sprintf("Tool call #%d Function struct: %+v", i+1, tc.Function))
+				if tc.Function.Name != "" {
+					logger.Debug("AGENT", fmt.Sprintf("Tool call #%d arguments: %s", i+1, tc.Function.Arguments))
+				}
+			}
 		}
 
 		// Send content chunk
@@ -651,6 +868,11 @@ func (r *ReactAgent) createToolsConfig() (compose.ToolsNodeConfig, error) {
 		return toolsConfig, fmt.Errorf("global configuration not initialized")
 	}
 
+	// Log agent configuration
+	logger.Info("AGENT", fmt.Sprintf("Initializing agent: %s", r.agentName))
+	logger.Debug("AGENT", fmt.Sprintf("Regular tools: %v", r.config.Tools))
+	logger.Debug("AGENT", fmt.Sprintf("MCP servers: %v", r.config.MCPServers))
+
 	// Add regular tools
 	for _, toolName := range r.config.Tools {
 		// Get tool configuration
@@ -662,28 +884,43 @@ func (r *ReactAgent) createToolsConfig() (compose.ToolsNodeConfig, error) {
 		// Create tool instance
 		toolInstance, err := createTool(toolName, toolCfg)
 		if err != nil {
+			logger.Error("AGENT", fmt.Sprintf("Failed to create tool %s: %v", toolName, err))
 			return toolsConfig, err
 		}
 
+		logger.Debug("AGENT", fmt.Sprintf("Added regular tool: %s", toolName))
 		toolsConfig.Tools = append(toolsConfig.Tools, toolInstance)
 	}
 
 	// Add MCP tools
 	if len(r.config.MCPServers) > 0 {
+		logger.Info("AGENT", "Looking for MCP tools...")
 		mcpManager := mcp.GetGlobalManager()
 		if mcpManager != nil {
 			// Get current Agent's MCP tools
 			mcpTools, err := mcpManager.GetToolsForAgent(r.agentName)
 			if err != nil {
+				logger.Error("AGENT", fmt.Sprintf("Failed to get MCP tools: %v", err))
 				return toolsConfig, fmt.Errorf("failed to get MCP tools: %w", err)
 			}
 
+			logger.Info("AGENT", fmt.Sprintf("Found %d MCP tools", len(mcpTools)))
 			// Add MCP tools to tools configuration
 			for _, mcpTool := range mcpTools {
+				if info, err := mcpTool.Info(context.Background()); err == nil {
+					logger.Info("AGENT", fmt.Sprintf("Added MCP tool: %s - %s", info.Name, info.Desc))
+				} else {
+					logger.Warn("AGENT", fmt.Sprintf("Added MCP tool but couldn't get info: %v", err))
+				}
 				toolsConfig.Tools = append(toolsConfig.Tools, mcpTool)
 			}
+		} else {
+			logger.Warn("AGENT", "MCP manager is nil")
 		}
+	} else {
+		logger.Info("AGENT", "No MCP servers configured")
 	}
 
+	logger.Info("AGENT", fmt.Sprintf("Total tools available: %d", len(toolsConfig.Tools)))
 	return toolsConfig, nil
 }

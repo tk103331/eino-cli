@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/tk103331/eino-cli/agent"
 	"github.com/tk103331/eino-cli/config"
+	"github.com/tk103331/eino-cli/logger"
 	"github.com/tk103331/eino-cli/models"
 	"github.com/tk103331/eino-cli/tools"
 )
@@ -38,16 +39,23 @@ type ChatApp struct {
 
 // NewAgentApp creates a new Agent application
 func NewAgentApp(agentName string) (*AgentApp, error) {
+	logger.Info("UI-AGENT", fmt.Sprintf("Creating agent app: %s", agentName))
+
 	cfg := config.GetConfig()
 	if cfg == nil {
+		logger.Error("UI-AGENT", "Global configuration not initialized")
 		return nil, fmt.Errorf("global configuration not initialized")
 	}
 
 	// Check if Agent configuration exists
-	_, ok := cfg.Agents[agentName]
+	agentConfig, ok := cfg.Agents[agentName]
 	if !ok {
+		logger.Error("UI-AGENT", fmt.Sprintf("Agent configuration does not exist: %s", agentName))
 		return nil, fmt.Errorf("Agent configuration does not exist: %s", agentName)
 	}
+
+	logger.Debug("UI-AGENT", fmt.Sprintf("Agent config: Model=%s, Tools=%v, MCP=%v",
+		agentConfig.Model, agentConfig.Tools, agentConfig.MCPServers))
 
 	// Create Agent factory
 	factory := agent.NewFactory(cfg)
@@ -55,8 +63,11 @@ func NewAgentApp(agentName string) (*AgentApp, error) {
 	// Create Agent instance
 	agentInstance, err := factory.CreateAgent(agentName)
 	if err != nil {
+		logger.Error("UI-AGENT", fmt.Sprintf("Failed to create agent: %v", err))
 		return nil, fmt.Errorf("failed to create Agent: %v", err)
 	}
+
+	logger.Info("UI-AGENT", fmt.Sprintf("Successfully created agent: %s", agentName))
 
 	app := &AgentApp{
 		agentName: agentName,
@@ -71,6 +82,7 @@ func NewAgentApp(agentName string) (*AgentApp, error) {
 	// Create Bubble Tea program
 	app.program = tea.NewProgram(*agentModel, tea.WithAltScreen())
 
+	logger.Info("UI-AGENT", fmt.Sprintf("Agent app created successfully: %s", agentName))
 	return app, nil
 }
 
@@ -112,6 +124,8 @@ func (app *ChatApp) Run() error {
 
 // sendMessage sends a message to AI
 func (app *AgentApp) sendMessage(message string) error {
+	logger.Info("UI-AGENT", fmt.Sprintf("Sending message: %s", truncateForLog(message)))
+
 	// Get Agent configuration
 	cfg := config.GetConfig()
 	agentConfig := cfg.Agents[app.agentName]
@@ -122,6 +136,7 @@ func (app *AgentApp) sendMessage(message string) error {
 	// Add system message (if any)
 	if agentConfig.System != "" {
 		messages = append(messages, schema.SystemMessage(agentConfig.System))
+		logger.Debug("UI-AGENT", fmt.Sprintf("Using system prompt: %s", truncateForLog(agentConfig.System)))
 	}
 
 	// Add user message
@@ -146,6 +161,8 @@ func (app *ChatApp) sendMessage(message string) error {
 
 // processConversation handles conversation (using streaming output)
 func (app *AgentApp) processConversation(messages []*schema.Message) {
+	logger.Info("UI-AGENT", "Starting conversation processing")
+
 	// Get the last user message as prompt
 	var prompt string
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -156,19 +173,55 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 	}
 
 	if prompt == "" {
+		logger.Error("UI-AGENT", "User message not found in conversation")
 		app.program.Send(ErrorMsg("User message not found"))
 		return
 	}
 
+	logger.Info("UI-AGENT", fmt.Sprintf("Processing prompt: %s", truncateForLog(prompt)))
+
 	// Create tool call callback function
 	toolCallback := func(msg interface{}) {
+		logger.Debug("UI-CALLBACK", fmt.Sprintf("Received: %T", msg))
+
 		switch v := msg.(type) {
+		case agent.ToolCallInfo:
+			// Handle ToolCallInfo from ReactAgent
+			isInternal := isInternalComponent(v.Name)
+			logger.Debug("UI-CALLBACK", fmt.Sprintf("ToolCallInfo: Name=%s, Type=%s, Internal=%v", v.Name, v.Type, isInternal))
+			if !isInternal {
+				switch v.Type {
+				case "start":
+					logger.Info("UI-TOOL", fmt.Sprintf("Starting: %s", v.Name))
+					logger.Debug("UI-TOOL", fmt.Sprintf("Arguments: %s", v.Arguments))
+					app.program.Send(ToolStartMsg{
+						Name:      v.Name,
+						Arguments: v.Arguments,
+					})
+				case "end":
+					logger.Info("UI-TOOL", fmt.Sprintf("Completed: %s", v.Name))
+					logger.Debug("UI-TOOL", fmt.Sprintf("Result: %s", truncateForLog(v.Result)))
+					app.program.Send(ToolEndMsg{
+						Name:   v.Name,
+						Result: v.Result,
+					})
+				case "error":
+					logger.Error("UI-TOOL", fmt.Sprintf("Tool %s error: %s", v.Name, v.Error))
+					app.program.Send(ErrorMsg(fmt.Sprintf("Tool %s error: %s", v.Name, v.Error)))
+				}
+			} else {
+				logger.Debug("UI-CALLBACK", fmt.Sprintf("Filtered internal component: %s", v.Name))
+			}
 		case struct {
 			Name      string
 			Arguments string
 		}:
-			// Only send real tool calls, filter internal components
-			if !isInternalComponent(v.Name) {
+			// Handle legacy format
+			isInternal := isInternalComponent(v.Name)
+			logger.Debug("UI-CALLBACK", fmt.Sprintf("Legacy start: Name=%s, Internal=%v", v.Name, isInternal))
+			if !isInternal {
+				logger.Info("UI-TOOL", fmt.Sprintf("Starting (legacy): %s", v.Name))
+				logger.Debug("UI-TOOL", fmt.Sprintf("Arguments: %s", v.Arguments))
 				app.program.Send(ToolStartMsg{
 					Name:      v.Name,
 					Arguments: v.Arguments,
@@ -178,15 +231,21 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 			Name   string
 			Result string
 		}:
-			// Only send real tool call results, filter internal components
-			if !isInternalComponent(v.Name) {
+			// Handle legacy format
+			isInternal := isInternalComponent(v.Name)
+			logger.Debug("UI-CALLBACK", fmt.Sprintf("Legacy end: Name=%s, Internal=%v", v.Name, isInternal))
+			if !isInternal {
+				logger.Info("UI-TOOL", fmt.Sprintf("Completed (legacy): %s", v.Name))
+				logger.Debug("UI-TOOL", fmt.Sprintf("Result: %s", truncateForLog(v.Result)))
 				app.program.Send(ToolEndMsg{
 					Name:   v.Name,
 					Result: v.Result,
 				})
 			}
 		default:
+			logger.Warn("UI-CALLBACK", fmt.Sprintf("Unknown callback type: %T", msg))
 			if errMsg, ok := msg.(string); ok {
+				logger.Error("UI-CALLBACK", fmt.Sprintf("Error message: %s", errMsg))
 				app.program.Send(ErrorMsg(errMsg))
 			}
 		}
@@ -207,9 +266,13 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 	}
 
 	// Use Agent's ChatStream method for streaming conversation
+	logger.Info("UI-AGENT", "Calling agent ChatStream")
 	err := app.agent.ChatStream(app.ctx, prompt, chunkCallback, toolCallback)
 	if err != nil {
+		logger.Error("UI-AGENT", fmt.Sprintf("AI response error: %v", err))
 		app.program.Send(ErrorMsg(fmt.Sprintf("AI response error: %v", err)))
+	} else {
+		logger.Info("UI-AGENT", "ChatStream completed successfully")
 	}
 }
 
@@ -545,10 +608,11 @@ func (app *ChatApp) createTools() ([]tool.InvokableTool, error) {
 
 // isInternalComponent determines if it is an internal component that should not be displayed to users
 func isInternalComponent(name string) bool {
+	// Filter out internal ReAct components that don't represent actual tool calls
+	// but still show actual tool invocations
 	internalComponents := []string{
 		"ChatModel",
-		"Tools",
-		"ReActAgent",
+		"Tools", // This is the ReAct tools orchestrator node, not actual tool calls
 	}
 
 	for _, component := range internalComponents {
@@ -557,6 +621,14 @@ func isInternalComponent(name string) bool {
 		}
 	}
 	return false
+}
+
+// truncateForLog truncates text for logging to avoid huge log entries
+func truncateForLog(text string) string {
+	if len(text) > 200 {
+		return text[:197] + "..."
+	}
+	return text
 }
 
 // Stop stops the Agent application
