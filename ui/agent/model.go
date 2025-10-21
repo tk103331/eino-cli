@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -252,12 +254,42 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var newStatus ToolStatus
 				var content string
 
-				// Check if result contains error indicators
-				if strings.Contains(strings.ToLower(toolResult), "error") ||
-					strings.Contains(strings.ToLower(toolResult), "failed") ||
-					strings.HasPrefix(toolResult, "❌") {
+				// Enhanced error detection with better patterns
+				isError := false
+
+				// Check for common error patterns
+				lowerResult := strings.ToLower(toolResult)
+				errorPatterns := []string{
+					"error", "failed", "exception", "timeout",
+					"not found", "invalid", "unauthorized",
+					"forbidden", "denied", "panic", "fatal",
+				}
+
+				for _, pattern := range errorPatterns {
+					if strings.Contains(lowerResult, pattern) {
+						isError = true
+						break
+					}
+				}
+
+				// Also check for common error prefixes
+				errorPrefixes := []string{"❌", "⚠️", "❗", "✖️", "×"}
+				for _, prefix := range errorPrefixes {
+					if strings.HasPrefix(toolResult, prefix) {
+						isError = true
+						break
+					}
+				}
+
+				// Try to extract a meaningful error message
+				if isError {
 					newStatus = ToolError
-					content = fmt.Sprintf("❌ Tool %s failed", msg.Name)
+					errorMsg := m.extractErrorMessage(toolResult)
+					if errorMsg != "" {
+						content = fmt.Sprintf("❌ Tool %s failed:\n%s", msg.Name, errorMsg)
+					} else {
+						content = fmt.Sprintf("❌ Tool %s failed", msg.Name)
+					}
 				} else {
 					newStatus = ToolSuccess
 					content = fmt.Sprintf("✅ Tool %s completed successfully", msg.Name)
@@ -268,7 +300,11 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if len(toolResult) > 150 {
 						toolResult = toolResult[:147] + "..."
 					}
-					content += fmt.Sprintf("\n📄 Result: %s", toolResult)
+					if isError {
+						content += fmt.Sprintf("\n📄 Error details: %s", toolResult)
+					} else {
+						content += fmt.Sprintf("\n📄 Result: %s", toolResult)
+					}
 				} else {
 					if newStatus == ToolSuccess {
 						content += "\n✨ Completed without output"
@@ -635,74 +671,126 @@ func (m ViewModel) View() string {
 	return fmt.Sprintf("%s\n%s\n\n%s\n%s", header, messageArea, inputArea, helpArea)
 }
 
-// formatToolCallContent generates formatted content for tool calls with header/parameters/result sections
+// formatToolCallContent generates formatted content for tool calls with simplified display
 func (m *ViewModel) formatToolCallContent(msg Message) string {
 	var sections []string
 
-	// Header section with tool name, status and duration
-	var statusIcon, statusText, durationText string
+	// Simplified header with tool name and status
+	var statusIcon string
 	switch msg.ToolStatus {
 	case ToolWaiting:
 		statusIcon = "⏳"
-		statusText = "Calling"
-		durationText = "calculating..."
 	case ToolSuccess:
 		statusIcon = "✅"
-		statusText = "Completed"
-		if msg.StartTime > 0 && msg.EndTime > 0 {
-			duration := msg.EndTime - msg.StartTime
-			if duration < 1 {
-				durationText = "< 1s"
-			} else {
-				durationText = fmt.Sprintf("%ds", duration)
-			}
-		}
 	case ToolError:
 		statusIcon = "❌"
-		statusText = "Failed"
-		if msg.StartTime > 0 && msg.EndTime > 0 {
-			duration := msg.EndTime - msg.StartTime
-			if duration < 1 {
-				durationText = "< 1s"
-			} else {
-				durationText = fmt.Sprintf("%ds", duration)
-			}
-		}
 	default:
 		statusIcon = "⏳"
-		statusText = "Calling"
-		durationText = "calculating..."
 	}
 
-	header := fmt.Sprintf("%s %s: %s (%s)", statusIcon, statusText, msg.Name, durationText)
+	// Simplified header - remove duration for cleaner display
+	header := fmt.Sprintf("%s %s", statusIcon, msg.Name)
 	sections = append(sections, header)
 
-	// Parameters section (only show if arguments exist)
-	if msg.Arguments != "" && msg.Arguments != "{}" {
-		sections = append(sections, "")
-		sections = append(sections, "📋 Parameters:")
-		sections = append(sections, fmt.Sprintf("   %s", msg.Arguments))
+	// Show arguments only if they're meaningful (not empty JSON and not too long)
+	if msg.Arguments != "" && msg.Arguments != "{}" && len(msg.Arguments) < 100 {
+		// Try to format as JSON if it looks like JSON
+		arguments := msg.Arguments
+		if strings.HasPrefix(arguments, "{") && strings.HasSuffix(arguments, "}") {
+			// JSON arguments - try to make them more readable
+			var jsonArgs interface{}
+			if err := json.Unmarshal([]byte(arguments), &jsonArgs); err == nil {
+				if compact, err := json.Marshal(jsonArgs); err == nil {
+					arguments = string(compact)
+				}
+			}
+		}
+		sections = append(sections, fmt.Sprintf("📝 %s", arguments))
 	}
 
-	// Result section (only show if tool has completed and result exists)
+	// Show result with smart truncation
 	if msg.ToolStatus != ToolWaiting && msg.Result != "" {
-		sections = append(sections, "")
-		sections = append(sections, "📄 Result:")
-		// Handle long results by truncating
 		result := msg.Result
-		if len(result) > 200 {
-			result = result[:197] + "..."
+		// For successful tools, show more concise result
+		if msg.ToolStatus == ToolSuccess {
+			if len(result) > 150 {
+				result = result[:147] + "..."
+			}
+			sections = append(sections, fmt.Sprintf("📄 %s", result))
+		} else {
+			// For errors, show slightly more detail
+			if len(result) > 200 {
+				result = result[:197] + "..."
+			}
+			sections = append(sections, fmt.Sprintf("❌ %s", result))
 		}
-		sections = append(sections, fmt.Sprintf("   %s", result))
-	} else if msg.ToolStatus == ToolSuccess && msg.Result == "" {
-		sections = append(sections, "")
-		sections = append(sections, "✨ Completed without output")
 	} else if msg.ToolStatus == ToolWaiting {
-		sections = append(sections, "")
-		sections = append(sections, "⌛ Please wait...")
+		sections = append(sections, "⌛ Processing...")
 	}
 
 	return strings.Join(sections, "\n")
+}
+
+// extractErrorMessage tries to extract a meaningful error message from tool output
+func (m *ViewModel) extractErrorMessage(toolResult string) string {
+	lines := strings.Split(strings.TrimSpace(toolResult), "\n")
+
+	// Look for the most meaningful error line
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Skip common unhelpful lines
+		skipPatterns := []string{
+			"stack trace:", "at ", "goroutine ", "created by ",
+			"panic:", "runtime error:", "call stack:",
+		}
+
+		shouldSkip := false
+		lowerLine := strings.ToLower(line)
+		for _, pattern := range skipPatterns {
+			if strings.Contains(lowerLine, pattern) {
+				shouldSkip = true
+				break
+			}
+		}
+
+		if !shouldSkip && len(line) > 5 && len(line) < 100 {
+			return line
+		}
+	}
+
+	// If no good line found, try to extract from JSON error messages
+	if strings.Contains(toolResult, "{") && strings.Contains(toolResult, "}") {
+		// Look for common JSON error fields
+		errorFields := []string{"error", "message", "msg", "description", "detail"}
+		for _, field := range errorFields {
+			pattern := fmt.Sprintf(`"%s":\s*"([^"]+)"`, field)
+			re := regexp.MustCompile(pattern)
+			matches := re.FindStringSubmatch(toolResult)
+			if len(matches) > 1 {
+				errorMsg := matches[1]
+				if len(errorMsg) > 10 && len(errorMsg) < 80 {
+					return errorMsg
+				}
+			}
+		}
+	}
+
+	// If still nothing good, return first non-empty line (truncated if too long)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			if len(line) > 80 {
+				return line[:77] + "..."
+			}
+			return line
+		}
+	}
+
+	return ""
 }
 
 // renderMarkdown renders markdown content - same as chat interface
