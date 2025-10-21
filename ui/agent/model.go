@@ -57,7 +57,8 @@ type ViewModel struct {
 	onSendMsg        func(string) error    // Callback function for sending messages
 	streamingContent string                // Currently streaming content
 	renderer         *glamour.TermRenderer // Markdown renderer
-	scrollOffset     int                   // Scroll offset for up/down key scrolling
+	scrollOffset     int                   // Scroll offset for up/down key scrolling (line-based)
+	renderedLines    []string              // Cached rendered lines for efficient scrolling
 }
 
 // Message type definitions
@@ -82,11 +83,213 @@ func NewViewModel(onSendMsg func(string) error) *ViewModel {
 	)
 
 	return &ViewModel{
-		messages:     []Message{},
-		onSendMsg:    onSendMsg,
-		renderer:     renderer,
-		scrollOffset: 0,
+		messages:      []Message{},
+		onSendMsg:     onSendMsg,
+		renderer:      renderer,
+		scrollOffset:  0,
+		renderedLines: []string{},
 	}
+}
+
+// updateRenderedLines updates the cached rendered lines for efficient scrolling
+func (m *ViewModel) updateRenderedLines() {
+	var lines []string
+
+	// Define color scheme (same as View function)
+	secondaryColor := "#06B6D4" // Cyan
+	successColor := "#10B981"   // Green
+	warningColor := "#F59E0B"   // Amber
+	errorColor := "#EF4444"     // Red
+	userColor := "#8B5CF6"      // Violet
+	mutedColor := "#6B7280"     // Gray
+
+	// Style definitions (same as View function)
+	userStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(userColor)).
+		Bold(true).
+		Padding(0, 1).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(userColor)).
+		MarginLeft(2).
+		MarginRight(2)
+
+	assistantStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(secondaryColor)).
+		Bold(true).
+		Padding(0, 1).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(secondaryColor)).
+		MarginLeft(2).
+		MarginRight(2)
+
+	toolWaitingStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(warningColor)).
+		Bold(true).
+		Italic(true).
+		Padding(0, 1).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(warningColor)).
+		MarginLeft(2).
+		MarginRight(2).
+		Width(m.width - 8)
+
+	toolSuccessStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(successColor)).
+		Bold(true).
+		Padding(0, 1).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(successColor)).
+		MarginLeft(2).
+		MarginRight(2).
+		Width(m.width - 8)
+
+	toolErrorStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(errorColor)).
+		Bold(true).
+		Padding(0, 1).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(errorColor)).
+		MarginLeft(2).
+		MarginRight(2).
+		Width(m.width - 8)
+
+	errorStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(errorColor)).
+		Bold(true).
+		Padding(0, 1).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(errorColor)).
+		MarginLeft(2).
+		MarginRight(2).
+		Width(m.width - 8)
+
+	waitingStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(secondaryColor)).
+		Italic(true).
+		Bold(true).
+		Padding(0, 1)
+
+	// Render all messages
+	for _, msg := range m.messages {
+		switch msg.Type {
+		case UserMessage:
+			userIcon := "👤 "
+			userLabel := userIcon + "You"
+			lines = append(lines, userStyle.Render(userLabel))
+			contentLines := strings.Split(msg.Content, "\n")
+			for _, line := range contentLines {
+				lines = append(lines, "    "+line)
+			}
+			lines = append(lines, "")
+
+		case AssistantMessage:
+			aiIcon := "🎯 "
+			aiLabel := aiIcon + "Assistant"
+			lines = append(lines, assistantStyle.Render(aiLabel))
+			renderedContent := m.renderMarkdown(msg.Content)
+			contentLines := strings.Split(renderedContent, "\n")
+			for _, line := range contentLines {
+				lines = append(lines, "    "+line)
+			}
+			lines = append(lines, "")
+
+		case ToolStartMessage:
+			var toolStyle lipgloss.Style
+			switch msg.ToolStatus {
+			case ToolWaiting:
+				toolStyle = toolWaitingStyle
+			case ToolSuccess:
+				toolStyle = toolSuccessStyle
+			case ToolError:
+				toolStyle = toolErrorStyle
+			default:
+				toolStyle = toolWaitingStyle
+			}
+			formattedContent := m.formatToolCallContent(msg)
+			lines = append(lines, toolStyle.Render(formattedContent))
+			lines = append(lines, "")
+
+		case ToolEndMessage:
+			var toolStyle lipgloss.Style
+			switch msg.ToolStatus {
+			case ToolSuccess:
+				toolStyle = toolSuccessStyle
+			case ToolError:
+				toolStyle = toolErrorStyle
+			default:
+				toolStyle = toolSuccessStyle
+			}
+			lines = append(lines, toolStyle.Render(msg.Content))
+			lines = append(lines, "")
+
+		case ErrorMessage:
+			errorIcon := "❌ "
+			errorLabel := errorIcon + "Error"
+			lines = append(lines, errorStyle.Render(errorLabel))
+			contentLines := strings.Split(msg.Content, "\n")
+			for _, line := range contentLines {
+				lines = append(lines, "    "+line)
+			}
+			lines = append(lines, "")
+		}
+	}
+
+	// Add streaming content
+	if m.streamingContent != "" {
+		aiIcon := "🎯 "
+		aiLabel := aiIcon + "Assistant (typing...)"
+		lines = append(lines, assistantStyle.Render(aiLabel))
+		renderedStreamContent := m.renderMarkdown(m.streamingContent)
+		contentLines := strings.Split(renderedStreamContent, "\n")
+		for _, line := range contentLines {
+			lines = append(lines, "    "+line)
+		}
+		lines = append(lines, "")
+	}
+
+	// Add waiting status
+	if m.isWaiting {
+		thinkingIcon := "🤔 "
+		waitingText := fmt.Sprintf("%sAI is thinking...", thinkingIcon)
+		lines = append(lines, waitingStyle.Render(waitingText))
+		lines = append(lines, "")
+	}
+
+	// Display error information (if not already shown as message)
+	if m.errorMsg != "" {
+		// Check if error is already in messages to avoid duplication
+		hasErrorMessage := false
+		for _, msg := range m.messages {
+			if msg.Type == ErrorMessage && msg.Content == m.errorMsg {
+				hasErrorMessage = true
+				break
+			}
+		}
+		if !hasErrorMessage {
+			errorIcon := "⚠️ "
+			errorLabel := errorIcon + "System Error"
+			lines = append(lines, errorStyle.Render(errorLabel))
+			contentLines := strings.Split(m.errorMsg, "\n")
+			for _, line := range contentLines {
+				lines = append(lines, "    "+line)
+			}
+			lines = append(lines, "")
+		}
+	}
+
+	// If no messages, show welcome message
+	if len(lines) == 0 {
+		welcomeIcon := "👋 "
+		welcomeText := fmt.Sprintf("%sWelcome to Eino CLI Agent! I'm ready to help you.", welcomeIcon)
+		lines = append(lines,
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color(mutedColor)).
+				Italic(true).
+				Render(welcomeText))
+		lines = append(lines, "")
+	}
+
+	m.renderedLines = lines
 }
 
 // Init initializes the model
@@ -105,63 +308,80 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.isWaiting {
 			// Only allow exit when waiting for response
-			switch msg.String() {
-			case "ctrl+c":
+			switch msg.Type {
+			case tea.KeyCtrlC, tea.KeyEsc:
 				return m, tea.Quit
 			}
 			return m, nil
 		}
 
-		switch msg.String() {
-		case "ctrl+c":
+		switch msg.Type {
+		case tea.KeyCtrlC, tea.KeyEsc:
 			return m, tea.Quit
-		case "up":
+		case tea.KeyUp:
+			// Scroll up to see older content (increase scroll offset)
+			m.updateRenderedLines()
+			maxLines := m.height - 6
+			if maxLines <= 0 {
+				maxLines = 1
+			}
+			maxScroll := len(m.renderedLines) - maxLines
+			if maxScroll < 0 {
+				maxScroll = 0
+			}
+			if m.scrollOffset < maxScroll {
+				m.scrollOffset++
+			}
+			return m, nil
+		case tea.KeyDown:
+			// Scroll down to see newer content (decrease scroll offset)
 			if m.scrollOffset > 0 {
 				m.scrollOffset--
 			}
 			return m, nil
-		case "down":
-			maxViewport := len(m.messages) - (m.height - 6)
-			if maxViewport < 0 {
-				maxViewport = 0
+		case tea.KeyPgUp:
+			// Scroll up by 5 lines (to older content)
+			m.updateRenderedLines()
+			maxLines := m.height - 6
+			if maxLines <= 0 {
+				maxLines = 1
 			}
-			if m.scrollOffset < maxViewport {
-				m.scrollOffset++
+			maxScroll := len(m.renderedLines) - maxLines
+			if maxScroll < 0 {
+				maxScroll = 0
+			}
+			if m.scrollOffset < maxScroll-5 {
+				m.scrollOffset += 5
+			} else if m.scrollOffset < maxScroll {
+				m.scrollOffset = maxScroll
 			}
 			return m, nil
-		case "pgup":
-			// Scroll up by 5 lines
+		case tea.KeyPgDown:
+			// Scroll down by 5 lines (to newer content)
 			if m.scrollOffset > 5 {
 				m.scrollOffset -= 5
 			} else {
 				m.scrollOffset = 0
 			}
 			return m, nil
-		case "pgdown":
-			// Scroll down by 5 lines
-			maxViewport := len(m.messages) - (m.height - 6)
-			if maxViewport < 0 {
-				maxViewport = 0
+		case tea.KeyHome:
+			// Scroll to top (oldest content)
+			m.updateRenderedLines()
+			maxLines := m.height - 6
+			if maxLines <= 0 {
+				maxLines = 1
 			}
-			if m.scrollOffset < maxViewport-5 {
-				m.scrollOffset += 5
-			} else if m.scrollOffset < maxViewport {
-				m.scrollOffset = maxViewport
+			maxScroll := len(m.renderedLines) - maxLines
+			if maxScroll < 0 {
+				maxScroll = 0
 			}
+			m.scrollOffset = maxScroll
 			return m, nil
-		case "home":
-			// Scroll to top
+		case tea.KeyEnd:
+			// Scroll to bottom (newest content)
 			m.scrollOffset = 0
 			return m, nil
-		case "end":
-			// Scroll to bottom
-			maxViewport := len(m.messages) - (m.height - 6)
-			if maxViewport < 0 {
-				maxViewport = 0
-			}
-			m.scrollOffset = maxViewport
-			return m, nil
-		case "enter":
+		case tea.KeyEnter:
 			if m.input != "" && !m.isWaiting {
 				// Add user message
 				m.messages = append(m.messages, Message{
@@ -176,6 +396,9 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.streamingContent = ""
 				m.errorMsg = ""
 
+				// Reset scroll to bottom when new message is sent
+				m.scrollOffset = 0
+
 				// Call callback function to send message
 				if m.onSendMsg != nil {
 					go func() {
@@ -188,13 +411,13 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				return m, nil
 			}
-		case "backspace":
+		case tea.KeyBackspace:
 			if len(m.input) > 0 {
 				m.input = m.input[:len(m.input)-1]
 			}
-		default:
+		case tea.KeyRunes:
 			if !m.isWaiting {
-				m.input += msg.String()
+				m.input += string(msg.Runes)
 			}
 		}
 
@@ -206,6 +429,8 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		m.isWaiting = false
 		m.streamingContent = ""
+		// Auto-scroll to bottom when response is complete
+		m.scrollOffset = 0
 		return m, nil
 
 	case StreamChunkMsg:
@@ -223,6 +448,8 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.streamingContent = ""
 		}
 		m.isWaiting = false
+		// Auto-scroll to bottom when stream ends
+		m.scrollOffset = 0
 		return m, nil
 
 	case ToolStartMsg:
@@ -356,13 +583,11 @@ func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the interface
 func (m ViewModel) View() string {
-	// Define color scheme
+	// Define color scheme (needed for status indicator)
 	primaryColor := "#7C3AED"   // Purple
-	secondaryColor := "#06B6D4" // Cyan
 	successColor := "#10B981"   // Green
 	warningColor := "#F59E0B"   // Amber
 	errorColor := "#EF4444"     // Red
-	userColor := "#8B5CF6"      // Violet
 	mutedColor := "#6B7280"     // Gray
 
 	// Enhanced style definitions
@@ -376,66 +601,6 @@ func (m ViewModel) View() string {
 		BorderForeground(lipgloss.Color(primaryColor)).
 		MarginBottom(1)
 
-	userStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(userColor)).
-		Bold(true).
-		Padding(0, 1).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(userColor)).
-		MarginLeft(2).
-		MarginRight(2)
-
-	assistantStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(secondaryColor)).
-		Bold(true).
-		Padding(0, 1).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(secondaryColor)).
-		MarginLeft(2).
-		MarginRight(2)
-
-	// Unified tool call styles based on status
-	toolWaitingStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(warningColor)).
-		Bold(true).
-		Italic(true).
-		Padding(0, 1).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(warningColor)).
-		MarginLeft(2).
-		MarginRight(2).
-		Width(m.width - 8)
-
-	toolSuccessStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(successColor)).
-		Bold(true).
-		Padding(0, 1).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(successColor)).
-		MarginLeft(2).
-		MarginRight(2).
-		Width(m.width - 8)
-
-	toolErrorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(errorColor)).
-		Bold(true).
-		Padding(0, 1).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(errorColor)).
-		MarginLeft(2).
-		MarginRight(2).
-		Width(m.width - 8)
-
-	errorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(errorColor)).
-		Bold(true).
-		Padding(0, 1).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(errorColor)).
-		MarginLeft(2).
-		MarginRight(2).
-		Width(m.width - 8)
-
 	inputStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(primaryColor)).
@@ -447,12 +612,6 @@ func (m ViewModel) View() string {
 		Faint(true).
 		Align(lipgloss.Center).
 		MarginTop(1)
-
-	waitingStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(secondaryColor)).
-		Italic(true).
-		Bold(true).
-		Padding(0, 1)
 
 	// Build enhanced header with branding
 	logo := "🤖"
@@ -477,161 +636,55 @@ func (m ViewModel) View() string {
 			Foreground(lipgloss.Color(statusColor)).
 			Render(statusIndicator))
 
-	// Build message display area
-	var messageLines []string
+	// Update rendered lines cache
+	m.updateRenderedLines()
 
-	// Display message history with enhanced scrolling
-	visibleMessages := m.messages
-	if m.scrollOffset > 0 && m.scrollOffset < len(m.messages) {
-		visibleMessages = m.messages[m.scrollOffset:]
-	}
-
-	for _, msg := range visibleMessages {
-		switch msg.Type {
-		case UserMessage:
-			userIcon := "👤 "
-			userLabel := userIcon + "You"
-			messageLines = append(messageLines, userStyle.Render(userLabel))
-			// Add content with proper indentation
-			contentLines := strings.Split(msg.Content, "\n")
-			for _, line := range contentLines {
-				messageLines = append(messageLines, "    "+line)
-			}
-			messageLines = append(messageLines, "")
-
-		case AssistantMessage:
-			aiIcon := "🎯 "
-			aiLabel := aiIcon + "Assistant"
-			messageLines = append(messageLines, assistantStyle.Render(aiLabel))
-			// Use markdown rendering for AI replies
-			renderedContent := m.renderMarkdown(msg.Content)
-			contentLines := strings.Split(renderedContent, "\n")
-			for _, line := range contentLines {
-				messageLines = append(messageLines, "    "+line)
-			}
-			messageLines = append(messageLines, "")
-
-		case ToolStartMessage:
-			// Render tool message based on its status
-			var toolStyle lipgloss.Style
-			switch msg.ToolStatus {
-			case ToolWaiting:
-				toolStyle = toolWaitingStyle
-			case ToolSuccess:
-				toolStyle = toolSuccessStyle
-			case ToolError:
-				toolStyle = toolErrorStyle
-			default:
-				toolStyle = toolWaitingStyle
-			}
-
-			// Generate formatted content with header/parameters/result sections
-			formattedContent := m.formatToolCallContent(msg)
-			messageLines = append(messageLines, toolStyle.Render(formattedContent))
-			messageLines = append(messageLines, "")
-
-		case ToolEndMessage:
-			// ToolEndMessage is now handled by updating ToolStartMessage
-			// Only render if it's a standalone message (fallback)
-			var toolStyle lipgloss.Style
-			switch msg.ToolStatus {
-			case ToolSuccess:
-				toolStyle = toolSuccessStyle
-			case ToolError:
-				toolStyle = toolErrorStyle
-			default:
-				toolStyle = toolSuccessStyle
-			}
-
-			messageLines = append(messageLines, toolStyle.Render(msg.Content))
-			messageLines = append(messageLines, "")
-
-		case ErrorMessage:
-			errorIcon := "❌ "
-			errorLabel := errorIcon + "Error"
-			messageLines = append(messageLines, errorStyle.Render(errorLabel))
-			// Add error content with proper indentation
-			contentLines := strings.Split(msg.Content, "\n")
-			for _, line := range contentLines {
-				messageLines = append(messageLines, "    "+line)
-			}
-			messageLines = append(messageLines, "")
-		}
-	}
-
-	// Display currently streaming content with enhanced styling
-	if m.streamingContent != "" {
-		aiIcon := "🎯 "
-		aiLabel := aiIcon + "Assistant (typing...)"
-		messageLines = append(messageLines, assistantStyle.Render(aiLabel))
-		// Use markdown rendering for streaming content as well
-		renderedStreamContent := m.renderMarkdown(m.streamingContent)
-		contentLines := strings.Split(renderedStreamContent, "\n")
-		for _, line := range contentLines {
-			messageLines = append(messageLines, "    "+line)
-		}
-		messageLines = append(messageLines, "")
-	}
-
-	// Display enhanced waiting status
-	if m.isWaiting {
-		thinkingIcon := "🤔 "
-		waitingText := fmt.Sprintf("%sAI is thinking...", thinkingIcon)
-		messageLines = append(messageLines, waitingStyle.Render(waitingText))
-		messageLines = append(messageLines, "")
-	}
-
-	// Display error information (if not already shown as message)
-	if m.errorMsg != "" {
-		// Check if error is already in messages to avoid duplication
-		hasErrorMessage := false
-		for _, msg := range m.messages {
-			if msg.Type == ErrorMessage && msg.Content == m.errorMsg {
-				hasErrorMessage = true
-				break
-			}
-		}
-		if !hasErrorMessage {
-			errorIcon := "⚠️ "
-			errorLabel := errorIcon + "System Error"
-			messageLines = append(messageLines, errorStyle.Render(errorLabel))
-			contentLines := strings.Split(m.errorMsg, "\n")
-			for _, line := range contentLines {
-				messageLines = append(messageLines, "    "+line)
-			}
-			messageLines = append(messageLines, "")
-		}
-	}
-
-	// If no messages, show welcome message
-	if len(messageLines) == 0 {
-		welcomeIcon := "👋 "
-		welcomeText := fmt.Sprintf("%sWelcome to Eino CLI Agent! I'm ready to help you.", welcomeIcon)
-		messageLines = append(messageLines,
-			lipgloss.NewStyle().
-				Foreground(lipgloss.Color(mutedColor)).
-				Italic(true).
-				Render(welcomeText))
-		messageLines = append(messageLines, "")
-	}
-
-	// Limit the number of displayed lines
+	// Use line-based scrolling
+	var visibleLines []string
 	maxLines := m.height - 6 // Reserve space for header, input box, help and borders
-	if maxLines > 0 && len(messageLines) > maxLines {
-		messageLines = messageLines[len(messageLines)-maxLines:]
+
+	if len(m.renderedLines) > maxLines && maxLines > 0 {
+		// Apply scroll offset - show newest content by default (scrollOffset = 0)
+		start := len(m.renderedLines) - maxLines - m.scrollOffset
+		if start < 0 {
+			start = 0
+		}
+		end := start + maxLines
+		if end > len(m.renderedLines) {
+			end = len(m.renderedLines)
+		}
+		visibleLines = m.renderedLines[start:end]
+	} else {
+		visibleLines = m.renderedLines
 	}
 
 	// Add scroll indicator if needed
 	scrollIndicator := ""
-	if len(m.messages) > maxLines {
-		scrollPosition := fmt.Sprintf("%d/%d", m.scrollOffset+1, len(m.messages))
-		scrollIndicator = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(mutedColor)).
-			Faint(true).
-			Render(fmt.Sprintf(" [%s]", scrollPosition))
+	if len(m.renderedLines) > maxLines && maxLines > 0 {
+		// Show current view range relative to total content
+		if len(m.renderedLines) > maxLines && m.scrollOffset > 0 {
+			startLine := len(m.renderedLines) - maxLines - m.scrollOffset + 1
+			endLine := len(m.renderedLines) - m.scrollOffset
+			scrollPosition := fmt.Sprintf("%d-%d/%d", startLine, endLine, len(m.renderedLines))
+			scrollIndicator = lipgloss.NewStyle().
+				Foreground(lipgloss.Color(mutedColor)).
+				Faint(true).
+				Render(fmt.Sprintf(" [%s]", scrollPosition))
+		} else {
+			// Showing newest content (scrollOffset = 0)
+			startLine := len(m.renderedLines) - maxLines + 1
+			if startLine < 1 {
+				startLine = 1
+			}
+			scrollPosition := fmt.Sprintf("%d-%d/%d", startLine, len(m.renderedLines), len(m.renderedLines))
+			scrollIndicator = lipgloss.NewStyle().
+				Foreground(lipgloss.Color(mutedColor)).
+				Faint(true).
+				Render(fmt.Sprintf(" [%s]", scrollPosition))
+		}
 	}
 
-	messageArea := strings.Join(messageLines, "\n")
+	messageArea := strings.Join(visibleLines, "\n")
 
 	// Build enhanced input area
 	inputIcon := "💬 "
