@@ -30,3 +30,8 @@ Thumbs.db
 
 eino-cli
 config.yml
+# Release/build artifacts
+dist/
+npm/vendor/
+npm/node_modules/
+npm/package-lock.json

@@ -6,6 +6,7 @@ Eino CLI is an intelligent AI Agent command-line tool based on the [CloudWeGo Ei
 
 - **Intelligent Agent System**: AI Agent based on ReAct pattern with tool calling and reasoning capabilities
 - **Interactive Chat Interface**: TUI-based chat interface for real-time conversations with AI models and agents
+- **ACP Agent Mode**: Runs as an [Agent Client Protocol](https://agentclientprotocol.com) agent so editors like Zed can drive Eino CLI
 - **Rich Tool Ecosystem**: Built-in various tools including search, browser, command line, HTTP requests, etc.
 - **Multi-Model Provider Support**: Supports OpenAI, Claude, Gemini, Qwen, DeepSeek, Ollama, Baidu Qianfan, ByteDance Doubao, and more
 - **Flexible Configuration System**: Manage Agents, tools, models, and chat presets through YAML configuration files
@@ -15,12 +16,53 @@ Eino CLI is an intelligent AI Agent command-line tool based on the [CloudWeGo Ei
 
 ## Installation
 
-### Install from Source
+### Install
+
+**Go install** (requires Go >= 1.24):
+
+```bash
+# Short command `eino` (recommended)
+go install github.com/tk103331/eino-cli/cmd/eino@latest
+
+# Or `eino-cli` (same program)
+go install github.com/tk103331/eino-cli@latest
+```
+
+**npm**:
+
+```bash
+npm install -g eino-cli    # provides both `eino` and `eino-cli`
+eino
+```
+
+**Homebrew**:
+
+```bash
+brew install tk103331/tap/eino-cli   # provides both `eino` and `eino-cli`
+```
+
+**Releasing (maintainers)**:
+
+```bash
+git tag v0.1.0 && git push --tags
+```
+
+GitHub Actions (`.github/workflows/release.yml`) will:
+1. build `eino` / `eino-cli` binaries for darwin/linux × amd64/arm64 with goreleaser and create a Release
+2. publish the npm package when the `NPM_TOKEN` secret is configured (version taken from the tag)
+3. update the `tk103331/homebrew-tap` formula when the `TAP_GITHUB_TOKEN` secret is configured
+
+Preparation before the first release:
+- npm automation token -> repo secret `NPM_TOKEN`
+- create `tk103331/homebrew-tap`, personal access token (repo scope) -> secret `TAP_GITHUB_TOKEN`
+
+**Build from source**:
 
 ```bash
 git clone https://github.com/tk103331/eino-cli.git
 cd eino-cli
-go install
+go install ./cmd/eino    # produces `eino`
+go install .             # produces `eino-cli`
 ```
 
 ## Usage
@@ -42,9 +84,67 @@ The configuration file contains the following main sections:
 - `mcp_servers`: MCP server configuration
 - `settings`: Global settings including Langfuse configuration
 
+
+
 ### 2. Interactive Agent/Chat Mode
 
+The TUI supports slash commands (type `/` to see the command palette with argument candidates):
+
+| Command | Description |
+|---|---|
+| `/help` | List all commands |
+| `/clear` | Clear the current conversation |
+| `/agent <name>` | Switch agent (agent mode) |
+| `/model <name>` | Switch model without restarting |
+| `/skill <name>` | Activate a configured skill; `/skill off` clears it |
+| `/theme <name> [light\|dark]` | Switch color theme (every theme ships light and dark variants) |
+
+The TUI does **not capture the mouse** by default, so native terminal text selection and copy work. It also enables the terminal's alternate-scroll mode (DECSET 1007), so on supported terminals (iTerm2, Kitty, WezTerm, xterm, ...) the wheel scrolls the transcript without any key press. If 1007 is unsupported, use ↑↓/PgUp/PgDn, or press `Ctrl+Y` to capture the mouse (press again to release).
+| `/tools` | List available tools |
+| `/status` | Show current agent/model/skill |
+
+`skills` are switchable capability presets in `config.yml` (extra system prompt, optional extra tools):
+
+```yaml
+skills:
+  translator:
+    description: "Translation assistant (EN <-> ZH)"
+    system: "You are a professional translator. Output only the translation."
+  coder:
+    description: "Coding assistant"
+    system: "Prefer runnable code examples."
+    tools: [shell]   # optional: extra tools
+```
+
+Skills can also live in **directories** (no config.yml needed), scanned in priority order:
+
+- `~/.eino-cli/skills/*.md` (highest priority)
+- `~/.agents/skills/*.md`
+
+On name clashes the first directory wins; directory skills override config.yml entries.
+
+Each file is a markdown document with optional front matter:
+
+```markdown
+---
+description: Code review
+tools: [shell]
+---
+You are a strict code reviewer. Start with correctness issues...
+```
+
 Start an interactive session with an agent or model:
+
+```bash
+# No arguments: resume the last used agent, or the built-in basic agent
+eino-cli agent
+eino-cli          # bare invocation is equivalent to `eino-cli agent`
+
+# The built-in agent uses `default_model` (or the first model alphabetically);
+# the last used agent is stored in ~/.eino-cli/last_agent
+```
+
+
 
 ```bash
 # Start an interactive agent session
@@ -79,7 +179,43 @@ Parameter description:
 - `--prompt, -p`: Specify the input prompt for the Agent (required)
 - `--config`: Specify the configuration file path (optional, defaults to ~/.eino-cli/config.yml)
 
-### 4. Configuration Example
+### 4. ACP Agent Mode (for editors like Zed)
+
+Run Eino CLI as an [Agent Client Protocol (ACP)](https://agentclientprotocol.com) agent.
+It speaks JSON-RPC 2.0 over stdio, so any ACP client (Zed, or your own tooling) can create sessions, send prompts, and receive streaming responses and tool call events.
+
+```bash
+# Expose an agent over ACP (defaults to the single configured agent)
+eino-cli acp --agent search_agent
+```
+
+Example Zed configuration (`settings.json`):
+
+```json
+{
+  "agent": {
+    "profiles": {
+      "eino": {
+        "provider": "acp",
+        "name": "Eino CLI",
+        "command": "eino-cli",
+        "args": ["acp", "--agent", "search_agent"]
+      }
+    }
+  }
+}
+```
+
+Supported ACP surface:
+
+- `initialize`, `session/new`, `session/prompt`, `session/cancel` (protocol v1)
+- Streaming `session/update` notifications: `agent_message_chunk`, `tool_call`, `tool_call_update`
+- Stop reasons: `end_turn` and `cancelled`
+- Tools from `config.yml` (built-in tools and MCP servers) are exposed as ACP tool calls with status (`pending`/`in_progress`/`completed`/`failed`) and kind (`search`, `execute`, `fetch`, ...)
+
+Note: logs are written to `~/.eino-cli/eino-cli.log` — stdout of the `acp` command is reserved for the protocol.
+
+### 5. Configuration Example
 
 Here's a complete configuration example:
 

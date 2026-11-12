@@ -1,0 +1,53 @@
+version: 2
+
+project_name: eino-cli
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  # Short alias binary: eino
+  - id: eino
+    main: ./cmd/eino
+    binary: eino
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/tk103331/eino-cli/version.Version={{ .Version }}
+
+  # Primary binary: eino-cli
+  - id: eino-cli
+    main: .
+    binary: eino-cli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/tk103331/eino-cli/version.Version={{ .Version }}
+
+# Publish raw binaries so the npm wrapper can download them directly.
+archives:
+  - formats: [binary]
+    name_template: "{{ .Binary }}-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: tk103331
+    name: eino-cli
+  draft: false
+  prerelease: auto

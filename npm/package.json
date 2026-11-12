@@ -1,0 +1,38 @@
+{
+  "name": "eino-cli",
+  "version": "0.0.0",
+  "description": "Eino CLI — AI Agent TUI with tools, MCP and ACP support, built on Eino",
+  "license": "MIT",
+  "bin": {
+    "eino": "bin/eino.js",
+    "eino-cli": "bin/eino.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "scripts",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tk103331/eino-cli.git"
+  },
+  "homepage": "https://github.com/tk103331/eino-cli",
+  "bugs": {
+    "url": "https://github.com/tk103331/eino-cli/issues"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "cli",
+    "tui",
+    "acp",
+    "eino"
+  ]
+}
