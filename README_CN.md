@@ -51,7 +51,7 @@ git tag v0.1.0 && git push --tags
 
 GitHub Actions（`.github/workflows/release.yml`）会自动完成：
 1. goreleaser 构建 darwin/linux × amd64/arm64 的 `eino` / `eino-cli` 二进制并创建 Release
-2. 配置了 `NPM_TOKEN` secret 时发布 npm 包（版本号取自 tag）
+2. 配置了仓库变量 `NPM_TRUSTED_PUBLISHING=true`（且 npm 包已配置 Trusted Publisher）时，通过 OIDC 发布 npm 包（版本号取自 tag，无需任何 token）
 3. 配置了 `TAP_GITHUB_TOKEN` secret 时更新 `tk103331/homebrew-tap` 的 formula
 
 首次发布前需要准备：

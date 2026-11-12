@@ -51,7 +51,7 @@ git tag v0.1.0 && git push --tags
 
 GitHub Actions (`.github/workflows/release.yml`) will:
 1. build `eino` / `eino-cli` binaries for darwin/linux × amd64/arm64 with goreleaser and create a Release
-2. publish the npm package when the `NPM_TOKEN` secret is configured (version taken from the tag)
+2. publish the npm package via OIDC when the repository variable `NPM_TRUSTED_PUBLISHING=true` is set and the npm package has a GitHub Actions trusted publisher (version taken from the tag, no token needed)
 3. update the `tk103331/homebrew-tap` formula when the `TAP_GITHUB_TOKEN` secret is configured
 
 Preparation before the first release:
