@@ -34,6 +34,8 @@ jobs:
     name: Publish npm package
     needs: release
     runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,22 +48,24 @@ jobs:
         run: cd npm && npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
 
       - name: Publish to npm
-        if: ${{ secrets.NPM_TOKEN != '' }}
+        if: env.NPM_TOKEN != ''
         run: cd npm && npm publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
 
   brew:
     name: Update Homebrew tap
     needs: release
     runs-on: ubuntu-latest
+    env:
+      TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Update tap formula
-        if: ${{ secrets.TAP_GITHUB_TOKEN != '' }}
+        if: env.TAP_GITHUB_TOKEN != ''
         env:
-          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.TAP_GITHUB_TOKEN }}
           TAP_REPO: tk103331/homebrew-tap
           VERSION: ${{ github.ref_name }}
         run: bash scripts/update-tap.sh
