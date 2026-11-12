@@ -596,6 +596,11 @@ func (r *ReactAgent) Run(prompt string) error {
 				// Empty content marks the end of the stream
 				fmt.Println()
 			}
+		case "reasoning":
+			// Dim italic: visibly separates the model's thinking from the answer
+			if chunk.Content != "" {
+				fmt.Printf("\x1b[2;3m%s\x1b[0m", chunk.Content)
+			}
 		case "tool_start":
 			fmt.Printf("\n🔧 Using tool: %s\n", chunk.Tool)
 		case "tool_end":
@@ -707,7 +712,20 @@ func (r *ReactAgent) ChatWithCallback(ctx context.Context, prompt string, callba
 	}
 	defer sr.Close()
 
+	// Split reasoning sections from visible content while streaming
+	tf := NewThinkFilter()
 	var result strings.Builder
+	emit := func(visible, thought string) {
+		if thought != "" && callback != nil {
+			callback(map[string]interface{}{"type": "reasoning", "content": thought})
+		}
+		if visible != "" {
+			if callback != nil {
+				callback(visible)
+			}
+			result.WriteString(visible)
+		}
+	}
 	for {
 		msg, err := sr.Recv()
 		if err != nil {
@@ -718,14 +736,11 @@ func (r *ReactAgent) ChatWithCallback(ctx context.Context, prompt string, callba
 			return "", fmt.Errorf("failed to receive stream message: %w", err)
 		}
 
-		// Send callback (for displaying message content)
-		if callback != nil && msg.Content != "" {
-			callback(msg.Content)
+		if msg.Content != "" {
+			emit(tf.Feed(msg.Content))
 		}
-
-		// Accumulate results
-		result.WriteString(msg.Content)
 	}
+	emit(tf.Flush())
 
 	return result.String(), nil
 }
@@ -784,15 +799,24 @@ func (r *ReactAgent) ChatStream(ctx context.Context, prompt string, chunkCallbac
 
 	logger.Info("AGENT", "Stream call successful, starting to read messages")
 
-	// Read streaming response
+	// Read streaming response, stripping <think>...</think> (thinking)
+	// sections some gateways embed in delta.content.
+	tf := NewThinkFilter()
 	messageCount := 0
 	for {
 		msg, err := sr.Recv()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				logger.Info("AGENT", fmt.Sprintf("Stream ended after receiving %d messages", messageCount))
-				// Stream ends, send end marker
+				// Flush buffered content, then send the end marker
 				if chunkCallback != nil {
+					restVisible, restThought := tf.Flush()
+					if restThought != "" {
+						chunkCallback(&StreamChunk{Type: "reasoning", Content: restThought})
+					}
+					if restVisible != "" {
+						chunkCallback(&StreamChunk{Type: "content", Content: restVisible})
+					}
 					chunkCallback(&StreamChunk{
 						Type:    "content",
 						Content: "",
@@ -828,12 +852,21 @@ func (r *ReactAgent) ChatStream(ctx context.Context, prompt string, chunkCallbac
 			}
 		}
 
-		// Send content chunk
+		// Send content chunk, splitting reasoning from the visible answer
 		if chunkCallback != nil && msg.Content != "" {
-			chunkCallback(&StreamChunk{
-				Type:    "content",
-				Content: msg.Content,
-			})
+			visible, thought := tf.Feed(msg.Content)
+			if thought != "" {
+				chunkCallback(&StreamChunk{
+					Type:    "reasoning",
+					Content: thought,
+				})
+			}
+			if visible != "" {
+				chunkCallback(&StreamChunk{
+					Type:    "content",
+					Content: visible,
+				})
+			}
 		}
 	}
 

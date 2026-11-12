@@ -20,6 +20,7 @@ type Config struct {
 	MCPServers   map[string]MCPServer `yaml:"mcp_servers,omitempty"`
 	Tools        map[string]Tool      `yaml:"tools,omitempty"`
 	Chats        map[string]Chat      `yaml:"chats,omitempty"`
+	Skills       map[string]Skill     `yaml:"skills,omitempty"`
 	Settings     Settings             `yaml:"settings,omitempty"`
 }
 
@@ -36,6 +37,15 @@ type Chat struct {
 	System string   `yaml:"system,omitempty"`
 	Model  string   `yaml:"model"`
 	Tools  []string `yaml:"tools,omitempty"`
+}
+
+// Skill represents an optional capability preset that can be switched on at
+// runtime (via the /skill command in the TUI). A skill extends the active
+// agent's system prompt and can add extra tools.
+type Skill struct {
+	Description string   `yaml:"description,omitempty"`
+	System      string   `yaml:"system,omitempty"`
+	Tools       []string `yaml:"tools,omitempty"`
 }
 
 // Provider represents AI provider configuration
@@ -106,6 +116,9 @@ func LoadConfig(configPath string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse configuration file: %w", err)
 	}
+
+	// Merge skills defined as markdown files (user and project directories).
+	loadSkillsFromDirs(&cfg)
 
 	// Save to global variable
 	globalConfig = &cfg

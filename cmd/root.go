@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tk103331/eino-cli/config"
 	"github.com/tk103331/eino-cli/mcp"
+	"github.com/tk103331/eino-cli/version"
 )
 
 var (
@@ -17,14 +18,34 @@ var (
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
-	Use:   "eino-cli",
-	Short: "Eino CLI tool",
-	Long:  `A command line interface for Eino`,
+	Use:     "eino-cli",
+	Short:   "Eino CLI tool",
+	Long:    `A command line interface for Eino`,
+	Version: version.Version,
+	// Running without a subcommand opens the interactive agent: the last used
+	// agent when available, otherwise the built-in basic agent.
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) > 0 {
+			return cmd.Help()
+		}
+		cfg := config.GetConfig()
+		name, err := resolveDefaultAgent(cfg)
+		if err != nil {
+			return err
+		}
+		return startAgentSession(name)
+	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Load configuration file
 		cfg, err := config.LoadConfig(configPath)
 		if err != nil {
 			return fmt.Errorf("failed to load configuration file: %w", err)
+		}
+
+		// Register the built-in agent when possible so it is always selectable
+		// (e.g. from the /agent palette). Failures are non-fatal here.
+		if _, err := ensureBuiltinAgent(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "Note: built-in agent unavailable: %v\n", err)
 		}
 
 		// Asynchronously initialize MCP manager (does not block command execution)

@@ -17,11 +17,14 @@ import (
 
 // AgentApp represents the Agent application structure
 type AgentApp struct {
-	agentName string
-	program   *tea.Program
-	model     *ViewModel
-	agent     agent.Agent
-	ctx       context.Context
+	agentName     string
+	modelOverride string // runtime model override via /model
+	skill         string // active skill via /skill
+	mouseEnabled  bool
+	program       *tea.Program
+	model         *ViewModel
+	agent         agent.Agent
+	ctx           context.Context
 }
 
 // ChatApp represents the chat application structure (merged from chat functionality)
@@ -31,6 +34,8 @@ type ChatApp struct {
 	modelName    string
 	tools        []string
 	system       string
+	skill        string // active skill via /skill
+	mouseEnabled bool
 	program      *tea.Program
 	model        *ViewModel
 	chatModel    model.ToolCallingChatModel
@@ -77,10 +82,13 @@ func NewAgentApp(agentName string) (*AgentApp, error) {
 
 	// Create Agent model, passing in the callback function for sending messages
 	agentModel := NewViewModel(app.sendMessage)
+	agentModel.SetSubtitle(agentName)
 	app.model = agentModel
+	agentModel.SetMouseToggle(app.toggleMouse)
+	app.registerCommands()
 
 	// Create Bubble Tea program
-	app.program = tea.NewProgram(*agentModel, tea.WithAltScreen())
+	app.program = tea.NewProgram(agentModel, tea.WithAltScreen())
 
 	logger.Info("UI-AGENT", fmt.Sprintf("Agent app created successfully: %s", agentName))
 	return app, nil
@@ -102,23 +110,58 @@ func NewChatApp(modelName string, tools []string, system string) *ChatApp {
 
 	// Create chat model, passing in the callback function for sending messages
 	chatModel := NewViewModel(app.sendMessage)
+	chatModel.SetSubtitle(modelName)
 	app.model = chatModel
+	chatModel.SetMouseToggle(app.toggleMouse)
+	app.registerCommands()
 
 	// Create Bubble Tea program
-	app.program = tea.NewProgram(*chatModel, tea.WithAltScreen())
+	app.program = tea.NewProgram(chatModel, tea.WithAltScreen())
 
 	return app
 }
 
+// toggleMouse flips mouse capture and returns the new state.
+func (app *AgentApp) toggleMouse() bool {
+	app.mouseEnabled = !app.mouseEnabled
+	if app.mouseEnabled {
+		app.program.EnableMouseCellMotion()
+	} else {
+		app.program.DisableMouseCellMotion()
+	}
+	return app.mouseEnabled
+}
+
+// toggleMouse flips mouse capture and returns the new state.
+func (app *ChatApp) toggleMouse() bool {
+	app.mouseEnabled = !app.mouseEnabled
+	if app.mouseEnabled {
+		app.program.EnableMouseCellMotion()
+	} else {
+		app.program.DisableMouseCellMotion()
+	}
+	return app.mouseEnabled
+}
+
 // Run runs the Agent application
 func (app *AgentApp) Run() error {
-	_, err := app.program.Run()
-	return err
+	return runTUI(app.program)
 }
 
 // Run runs the Chat application (merged from chat functionality)
 func (app *ChatApp) Run() error {
-	_, err := app.program.Run()
+	return runTUI(app.program)
+}
+
+// runTUI starts the bubbletea program with wheel scrolling via the terminal's
+// alternate-scroll mode (DECSET 1007): in the alternate screen the wheel is
+// translated to arrow keys, so scrolling works while the mouse stays
+// uncaptured and native text selection/copy keeps working.
+func runTUI(program *tea.Program) error {
+	// Best-effort: terminals that do not support 1007 simply ignore it.
+	fmt.Print("\x1b[?1007h")
+	defer fmt.Print("\x1b[?1007l")
+	_, err := program.Run()
 	return err
 }
 
@@ -126,9 +169,12 @@ func (app *ChatApp) Run() error {
 func (app *AgentApp) sendMessage(message string) error {
 	logger.Info("UI-AGENT", fmt.Sprintf("Sending message: %s", truncateForLog(message)))
 
-	// Get Agent configuration
-	cfg := config.GetConfig()
-	agentConfig := cfg.Agents[app.agentName]
+	// Get the effective agent configuration (config + model/skill overrides)
+	agentConfig, ok := app.effectiveAgentConfig()
+	if !ok {
+		app.program.Send(ErrorMsg(fmt.Sprintf("Agent configuration does not exist: %s", app.agentName)))
+		return fmt.Errorf("Agent configuration does not exist: %s", app.agentName)
+	}
 
 	// Build message list
 	var messages []*schema.Message
@@ -151,7 +197,7 @@ func (app *AgentApp) sendMessage(message string) error {
 // sendMessage sends a message to AI model (for ChatApp use)
 func (app *ChatApp) sendMessage(message string) error {
 	// If there are tool configurations, use ReactAgent's ChatWithCallback method
-	if len(app.tools) > 0 {
+	if len(app.effectiveTools()) > 0 {
 		return app.sendMessageWithAgent(message)
 	}
 
@@ -260,6 +306,10 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 			} else {
 				app.program.Send(StreamEndMsg{})
 			}
+		case "reasoning":
+			if chunk.Content != "" {
+				app.program.Send(ReasoningChunkMsg(chunk.Content))
+			}
 		case "error":
 			app.program.Send(ErrorMsg(chunk.Content))
 		}
@@ -281,9 +331,9 @@ func (app *ChatApp) sendMessageWithAgent(message string) error {
 	// Create temporary Agent configuration
 	if app.reactAgent == nil {
 		agentConfig := config.Agent{
-			System: app.system,
+			System: app.effectiveSystem(),
 			Model:  app.modelName,
-			Tools:  app.tools,
+			Tools:  app.effectiveTools(),
 		}
 
 		// Create ReactAgent instance
@@ -309,6 +359,10 @@ func (app *ChatApp) sendMessageWithAgent(message string) error {
 				// Tool call information
 				if toolType, ok := v["type"].(string); ok {
 					switch toolType {
+					case "reasoning":
+						if content, ok := v["content"].(string); ok && content != "" {
+							app.program.Send(ReasoningChunkMsg(content))
+						}
 					case "tool_start":
 						if toolName, ok := v["tool_name"].(string); ok {
 							var inputStr string
@@ -409,8 +463,8 @@ func (app *ChatApp) sendMessageWithModel(message string) error {
 
 		// Create message list, including optional system prompt
 		var messages []*schema.Message
-		if app.system != "" {
-			messages = append(messages, schema.SystemMessage(app.system))
+		if system := app.effectiveSystem(); system != "" {
+			messages = append(messages, schema.SystemMessage(system))
 		}
 		messages = append(messages, schema.UserMessage(message))
 
@@ -425,6 +479,7 @@ func (app *ChatApp) sendMessageWithModel(message string) error {
 func (app *ChatApp) processConversation(ctx context.Context, messages []*schema.Message) {
 	maxIterations := 10 // Prevent infinite loops
 	iteration := 0
+	tf := agent.NewThinkFilter()
 
 	for iteration < maxIterations {
 		iteration++
@@ -453,9 +508,15 @@ func (app *ChatApp) processConversation(ctx context.Context, messages []*schema.
 				break
 			}
 
-			// Accumulate content and send incremental updates
-			fullContent += chunk.Content
-			app.program.Send(StreamChunkMsg(chunk.Content))
+			// Split reasoning from visible content before sending updates
+			visible, thought := tf.Feed(chunk.Content)
+			if thought != "" {
+				app.program.Send(ReasoningChunkMsg(thought))
+			}
+			if visible != "" {
+				fullContent += visible
+				app.program.Send(StreamChunkMsg(visible))
+			}
 
 			// Check if current chunk contains tool calls
 			if len(chunk.ToolCalls) > 0 {
@@ -467,6 +528,17 @@ func (app *ChatApp) processConversation(ctx context.Context, messages []*schema.
 			assistantMessage = chunk
 		}
 		streamReader.Close()
+
+		// Drain any content buffered by the reasoning filter
+		if visible, thought := tf.Flush(); thought != "" || visible != "" {
+			if thought != "" {
+				app.program.Send(ReasoningChunkMsg(thought))
+			}
+			if visible != "" {
+				fullContent += visible
+				app.program.Send(StreamChunkMsg(visible))
+			}
+		}
 
 		// If tool calls were accumulated, merge them into the final assistant message
 		if len(allToolCalls) > 0 && assistantMessage != nil {

@@ -76,6 +76,7 @@ agents:
 
 # Tool configuration
 tools:
+  # Skill presets can be switched at runtime in the TUI: /skill <name>
   duckduckgo_search:
     type: duckduckgo
     config:
@@ -108,6 +109,15 @@ tools:
       dir: "/tmp"
       timeout: 30
     params: []
+
+# Skills: switchable capability presets (TUI: /skill <name>)
+skills:
+  translator:
+    description: "Translation assistant (EN <-> ZH)"
+    system: "You are a professional translator. Translate Chinese to English and English to Chinese, output only the translation."
+  coder:
+    description: "Coding assistant with runnable examples"
+    system: "You are a senior engineer. Prefer concise, runnable code examples with brief explanations."
 
 settings:
   langfuse:
