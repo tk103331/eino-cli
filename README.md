@@ -23,6 +23,8 @@ Eino CLI is an intelligent AI Agent command-line tool based on the [CloudWeGo Ei
 ```bash
 # Short command `eino` (recommended)
 go install github.com/tk103331/eino-cli/cmd/eino@latest
+# If you hit `sumdb ... 404` (checksum DB indexing delay for a new release):
+# GONOSUMDB=github.com/tk103331/eino-cli go install github.com/tk103331/eino-cli/cmd/eino@latest
 
 # Or `eino-cli` (same program)
 go install github.com/tk103331/eino-cli@latest

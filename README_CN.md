@@ -23,6 +23,8 @@ Eino CLI 是一个基于 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框
 ```bash
 # 安装短命令 eino（推荐）
 go install github.com/tk103331/eino-cli/cmd/eino@latest
+# 若提示 sumdb ... 404（新版本校验库索引延迟）：
+# GONOSUMDB=github.com/tk103331/eino-cli go install github.com/tk103331/eino-cli/cmd/eino@latest
 
 # 或安装 eino-cli（两者是同一个程序）
 go install github.com/tk103331/eino-cli@latest
