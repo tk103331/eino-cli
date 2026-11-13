@@ -5,11 +5,11 @@ Eino CLI is an intelligent AI Agent command-line tool based on the [CloudWeGo Ei
 ## Features
 
 - **Intelligent Agent System**: AI Agent based on ReAct pattern with tool calling and reasoning capabilities
-- **Interactive Chat Interface**: TUI-based chat interface for real-time conversations with AI models and agents
+- **Interactive TUI**: Terminal UI for real-time conversations with agents, including slash commands, tool approval and session resume
 - **ACP Agent Mode**: Runs as an [Agent Client Protocol](https://agentclientprotocol.com) agent so editors like Zed can drive Eino CLI
 - **Rich Tool Ecosystem**: Built-in various tools including search, browser, command line, HTTP requests, etc.
 - **Multi-Model Provider Support**: Supports OpenAI, Claude, Gemini, Qwen, DeepSeek, Ollama, Baidu Qianfan, ByteDance Doubao, and more
-- **Flexible Configuration System**: Manage Agents, tools, models, and chat presets through YAML configuration files
+- **Flexible Configuration System**: Manage agents, tools, models and skills through YAML configuration files
 - **Custom Tool Support**: Supports custom HTTP and command-line tools
 - **MCP Server Integration**: Supports Model Context Protocol (MCP) servers with both SSE and STDIO transport
 - **Langfuse Integration**: Built-in observability with Langfuse for monitoring and tracing
@@ -80,15 +80,14 @@ cp config.yml.example config.yml
 The configuration file contains the following main sections:
 - `providers`: AI model provider configuration (API keys, base URLs, etc.)
 - `models`: Model configuration (temperature, max tokens, etc.)
-- `agents`: Agent configuration (system prompts, models and tools to use)
-- `chats`: Chat preset configuration for interactive chat mode
+- `agents`: Agent configuration (system prompts, models and tools; an agent without `model` uses `default_model`, or the first model)
 - `tools`: Tool configuration (parameters and settings for custom tools)
 - `mcp_servers`: MCP server configuration
 - `settings`: Global settings including Langfuse configuration
 
 
 
-### 2. Interactive Agent/Chat Mode
+### 2. Interactive Agent Mode
 
 The TUI supports slash commands (type `/` to see the command palette with argument candidates):
 
@@ -99,11 +98,35 @@ The TUI supports slash commands (type `/` to see the command palette with argume
 | `/agent <name>` | Switch agent (agent mode) |
 | `/model <name>` | Switch model without restarting |
 | `/skill <name>` | Activate a configured skill; `/skill off` clears it |
+| `/resume [id\|#]` | List or resume saved sessions (conversation context is restored) |
 | `/theme <name> [light\|dark]` | Switch color theme (every theme ships light and dark variants) |
-
-The TUI does **not capture the mouse** by default, so native terminal text selection and copy work. It also enables the terminal's alternate-scroll mode (DECSET 1007), so on supported terminals (iTerm2, Kitty, WezTerm, xterm, ...) the wheel scrolls the transcript without any key press. If 1007 is unsupported, use ↑↓/PgUp/PgDn, or press `Ctrl+Y` to capture the mouse (press again to release).
 | `/tools` | List available tools |
-| `/status` | Show current agent/model/skill |
+| `/status` | Show current agent/model/skill/session |
+
+Switching the model with `/model` is remembered: the choice is stored per agent in `~/.eino-cli/agent_models.json` and restored on the next start. This only applies to agents whose configured model is the default model (`default_model`, or the first model when it is unset); an agent that pins its own `model:` in `config.yml` always keeps it.
+
+The TUI does **not capture the mouse** by default, so native terminal text selection and copy work. It also enables the terminal's alternate-scroll mode (DECSET 1007), so on supported terminals (iTerm2, Kitty, WezTerm, xterm, ...) the wheel scrolls the transcript without any key press. If 1007 is unsupported, use ↑↓/PgUp/PgDn, or press `Ctrl+Y` to capture the mouse (press again to release). With mouse capture on, clicking a thinking, tool-call or error line expands/folds it (the same as `Tab` + `Ctrl+O`). Errors start folded to their first line.
+
+Conversations are saved automatically under `~/.eino-cli/sessions/` as append-only JSONL (one `<id>.jsonl` file per session). Every turn is its own line: user/assistant text, model reasoning and tool calls (arguments, results, timing), so the transcript can be restored exactly and an interrupted turn never rewrites earlier history. Every new run starts a fresh session; `/clear` (or Ctrl+L) also starts a new one, and `/resume <id>` replays a saved conversation into the model context. `/resume` without arguments lists recent sessions; a number picks from that list.
+
+**Tool approval.** In interactive sessions dangerous tool calls (shell commands, custom commands, file writes/edits/deletes/moves, non-GET HTTP requests) pause with a `⚠ 工具审批` panel before running:
+
+| Key | Effect |
+|---|---|
+| `↑`/`↓` + `Enter` | Choose *allow once* / *allow for this session* / *deny* |
+| `Esc` | Deny |
+
+A denial is returned to the model as a result (not an error), so the turn continues and the model can propose a safer plan. "Allow for this session" is remembered per tool until `/clear`, `/resume` or exit. Configure it with `settings.approval`:
+
+```yaml
+settings:
+  approval:
+    mode: dangerous   # off | dangerous (default) | all
+    allow: []         # tools that never need confirmation
+    always: []        # tools that always do (useful for MCP tools)
+```
+
+`run` and `acp` have no UI to ask, so tools run without the prompt there.
 
 `skills` are switchable capability presets in `config.yml` (extra system prompt, optional extra tools):
 
@@ -135,38 +158,24 @@ tools: [shell]
 You are a strict code reviewer. Start with correctness issues...
 ```
 
-Start an interactive session with an agent or model:
+Start an interactive session with an agent:
 
 ```bash
-# No arguments: resume the last used agent, or the built-in basic agent
+# No arguments: resume the last used agent, or start the built-in `Eino` agent
 eino-cli agent
 eino-cli          # bare invocation is equivalent to `eino-cli agent`
 
-# The built-in agent uses `default_model` (or the first model alphabetically);
-# the last used agent is stored in ~/.eino-cli/last_agent
-```
+# The built-in `Eino` agent uses `default_model` (or the first model
+# alphabetically) and enables commandline, filesystem, httprequest, browseruse,
+# subagent, ask_user and todolist by default. The last used agent is stored in
+# ~/.eino-cli/last_agent
 
-
-
-```bash
-# Start an interactive agent session
+# Start a specific configured agent
 eino-cli agent --agent search_agent
-
-# Chat with a specific model
-eino-cli agent --model gpt4
-
-# Chat with tools
-eino-cli agent --model gpt4 --tools duckduckgo_search,wikipedia_search
-
-# Use a chat preset
-eino-cli agent --chat search_chat
 ```
 
 Parameter description:
-- `--agent, -a`: Specify the agent name to run (optional)
-- `--chat, -c`: Specify a chat preset name from configuration file (optional)
-- `--model, -m`: Specify the model to chat with (required when not using --agent or --chat)
-- `--tools, -t`: Specify available tools, separated by commas (optional when using --model directly)
+- `--agent, -a`: Specify the agent name to run (optional; defaults to the last used agent or the built-in `Eino`)
 
 ### 3. Running an Agent
 
@@ -245,21 +254,6 @@ models:
     max_tokens: 4096
     temperature: 0.7
 
-# Chat preset configuration
-chats:
-  search_chat:
-    model: gpt4
-    system: "You are a helpful search assistant. Use search tools to find information for users."
-    tools:
-      - duckduckgo_search
-      - wikipedia_search
-  coding_chat:
-    model: claude_sonnet
-    system: "You are an expert programmer helping with coding tasks."
-    tools:
-      - commandline
-      - http_request
-
 # MCP server configuration
 mcp_servers:
   # SSE type MCP server
@@ -336,9 +330,22 @@ tools:
       dir: "/tmp"
       timeout: 30
     params: []
+  # Filesystem tool: edit files below a root directory
+  workspace:
+    type: filesystem
+    config:
+      root: "."              # Accessible directory, default: current directory
+      max_bytes: 204800      # Read budget per call, default 200 KiB
+      max_entries: 500       # Max entries returned by list, default 500
+      timeout: 30            # Per-call timeout in seconds, default 30
 
 # Global settings
 settings:
+  # Tool approval for interactive sessions (see above)
+  approval:
+    mode: dangerous      # off | dangerous | all
+    allow: []
+    always: []
   langfuse:
     host: https://cloud.langfuse.com
     public_key: pk-xxx
@@ -356,16 +363,48 @@ Eino CLI comes with various built-in tools that can be used in Agents:
 - **Wikipedia**: Wikipedia search
 
 ### Browser Tools
-- **Browser Use**: Browser automation tool
+- **Browser Use**: Browser automation tool. The browser is started lazily on the first call (it no longer opens one at startup); pass `config.headless: true` to run it without a visible window.
 
 ### System Tools
 - **Command Line**: Execute system commands
+- **Filesystem**: Read and edit files below a root directory (`read`/`write`/`append`/`list`/`stat`/`mkdir`/`delete`/`move`/`grep`); paths escaping the root are rejected
 - **HTTP Request**: Send HTTP requests
 - **Sequential Thinking**: Sequential thinking tool
+
+### Agent Tools
+- **Subagent**: Delegate a self-contained task to another agent and return its answer. Pass `agent` to run a configured agent, or `system` (+ optional `model` and `tools`) to create a temporary one for that call. The child has its own conversation, inherits cancellation, tool approvals and the parent's current model (including a `/model` switch; a configured agent with its own `model:` keeps it), and cannot nest deeper than `max_depth`.
+
+```yaml
+tools:
+  subagent:
+    type: subagent
+    config:
+      agents: []           # allowlist of configured agents, empty = all
+      tools: []            # allowlist of tools a temporary agent may use, empty = all
+      allow_temp: true     # allow ad-hoc agents built from a system prompt
+      max_depth: 1         # nesting limit (prevents runaway recursion)
+      timeout: 300         # per-child-run timeout in seconds
+```
 
 ### Custom Tools
 - **Custom HTTP**: Custom HTTP tools
 - **Custom Exec**: Custom command execution tools
+
+### Interactive Tools (agent mode adds these automatically)
+- **ask_user**: The model asks the user a question; the TUI shows a question panel with optional choices (↑↓ + Enter) or a free-text answer. The answer is returned to the model as the tool result.
+- **todolist**: The model creates/updates a task list; the TUI shows a `☑ 任务 done/total` panel above the input, and snapshots are appended to the session JSONL so `/resume` restores them. Once every task is completed, the panel folds to a single summary line on your next message; new tasks expand it automatically and clicking it (with mouse capture on) unfolds it again.
+
+Both tools are exposed automatically in agent sessions. To use them in `run`, declare the config entries:
+
+```yaml
+tools:
+  ask_user:
+    type: askuser
+  todolist:
+    type: todolist   # `type: todo` is still accepted for older configs
+```
+
+Questions and task snapshots are persisted in the session file as `question` / `todo` JSONL events.
 
 ## Supported Model Providers
 
@@ -382,7 +421,7 @@ Eino CLI comes with various built-in tools that can be used in Agents:
 
 - [CloudWeGo Eino](https://github.com/cloudwego/eino) - AI application development framework
 - [Cobra](https://github.com/spf13/cobra) - Command-line interface framework
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea) - TUI framework for interactive chat
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea) - TUI framework for interactive terminal UIs
 - Various Eino extension components (models and tools)
 
 ## License

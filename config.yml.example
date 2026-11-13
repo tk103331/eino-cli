@@ -13,21 +13,6 @@ models:
     max_tokens: 4096
     temperature: 0.7
 
-# Chat preset configuration
-chats:
-  search_chat:
-    model: gpt4
-    system: "You are a helpful search assistant. Use search tools to find information for users."
-    tools:
-      - duckduckgo_search
-      - wikipedia_search
-  coding_chat:
-    model: gpt4
-    system: "You are a professional programmer who helps users complete programming tasks."
-    tools:
-      - commandline
-      - http_request
-
 # MCP server configuration
 mcp_servers:
   # SSE type MCP server
@@ -110,6 +95,45 @@ tools:
       timeout: 30
     params: []
 
+  # Filesystem tool: read/write/list/move/grep files below a root directory.
+  # Paths outside the root (including through symlinks) are rejected.
+  workspace:
+    type: filesystem
+    config:
+      root: "."              # Directory the tool may access, default: current dir
+      max_bytes: 204800      # Read budget per call in bytes, default 200 KiB
+      max_entries: 500       # Max entries returned by list, default 500
+      timeout: 30            # Per-call timeout in seconds, default 30
+
+  # Subagent tool: delegate a self-contained task to another agent, either a
+  # configured one or one created on the fly from a system prompt.
+  subagent:
+    type: subagent
+    config:
+      agents: []           # allowlist of configured agents, empty = all
+      tools: []            # allowlist for temporary agents, empty = all
+      # children inherit the parent's current model unless it is pinned
+      allow_temp: true     # allow ad-hoc agents built from a system prompt
+      max_depth: 1         # subagent nesting limit
+      timeout: 300         # per-child-run timeout in seconds
+
+  # Browser automation (browser-use backend required). The browser starts on
+  # the first tool call, not when the app starts.
+  browseruse:
+    type: browseruse
+    # config:
+    #   headless: true        # run without a visible window (default: false)
+    #   chrome_path: ""       # custom Chrome/Chromium executable
+    #   proxy: ""             # optional proxy server
+    #   args: []              # extra Chromium flags
+
+  # Interactive tools. Agent sessions add these automatically (the TUI hosts
+  # them); declare them explicitly to use them in `run`.
+  ask_user:
+    type: askuser
+  todolist:
+    type: todolist
+
 # Skills: switchable capability presets (TUI: /skill <name>)
 skills:
   translator:
@@ -120,6 +144,12 @@ skills:
     system: "You are a senior engineer. Prefer concise, runnable code examples with brief explanations."
 
 settings:
+  # Tool approval (interactive TUI only; run/ACP start without a prompt).
+  approval:
+    mode: dangerous      # off: never ask | dangerous: ask for mutating calls (default) | all: ask every call
+    allow: []            # tool names that never need confirmation
+    always: []           # tool names that always do (e.g. MCP tools, which cannot be classified)
+
   langfuse:
     host: https://cloud.langfuse.com
     public_key: pk-xxx
