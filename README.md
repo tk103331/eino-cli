@@ -105,11 +105,15 @@ The TUI supports slash commands (type `/` to see the command palette with argume
 | `/model <name>` | Switch model without restarting |
 | `/skill <name>` | Activate a configured skill; `/skill off` clears it |
 | `/resume [id\|#]` | List or resume saved sessions (conversation context is restored) |
-| `/theme <name> [light\|dark]` | Switch color theme (every theme ships light and dark variants) |
+| `/theme <name> [light\|dark]` | Switch color theme (every theme ships light and dark variants): `violet` (default), `catppuccin`, `nord`, `gruvbox`, `tokyo-night`, `dracula`, `mono` |
 | `/tools` | List available tools |
 | `/status` | Show current agent/model/skill/session |
 
 Switching the model with `/model` is remembered: the choice is stored per agent in `~/.eino-cli/agent_models.json` and restored on the next start. This only applies to agents whose configured model is the default model (`default_model`, or the first model when it is unset); an agent that pins its own `model:` in `config.yml` always keeps it.
+
+The header shows the active agent and model (`◆ Eino CLI Agent · Eino · qwen-local`) and updates right after `/agent`, `/model` or `/resume`. On narrow terminals the label is truncated so the status stays on the row.
+
+While a reply is streaming, press `Esc` twice to stop it: the first press only arms the hint, the second one within two seconds cancels the run and keeps whatever streamed so far.
 
 The TUI does **not capture the mouse** by default, so native terminal text selection and copy work. It also enables the terminal's alternate-scroll mode (DECSET 1007), so on supported terminals (iTerm2, Kitty, WezTerm, xterm, ...) the wheel scrolls the transcript without any key press. If 1007 is unsupported, use ↑↓/PgUp/PgDn, or press `Ctrl+Y` to capture the mouse (press again to release). With mouse capture on, clicking a thinking, tool-call or error line expands/folds it (the same as `Tab` + `Ctrl+O`). Errors start folded to their first line.
 
@@ -195,6 +199,9 @@ Parameter description:
 - `--agent, -a`: Specify the Agent name to run (required)
 - `--prompt, -p`: Specify the input prompt for the Agent (required)
 - `--config`: Specify the configuration file path (optional, defaults to ~/.eino-cli/config.yml)
+- `--cwd, -C`: Run in this working directory (optional, defaults to the current one). Tools resolve relative paths against it, e.g. `eino -C ~/project`
+
+The directory can also be a positional argument: `eino ~/project`, `eino agent ~/project`. Passing both `--cwd` and a positional directory is an error. `run` keeps its flag-only interface.
 
 ### 4. ACP Agent Mode (for editors like Zed)
 
@@ -202,9 +209,15 @@ Run Eino CLI as an [Agent Client Protocol (ACP)](https://agentclientprotocol.com
 It speaks JSON-RPC 2.0 over stdio, so any ACP client (Zed, or your own tooling) can create sessions, send prompts, and receive streaming responses and tool call events.
 
 ```bash
-# Expose an agent over ACP (defaults to the single configured agent)
+# Expose an agent over ACP
 eino-cli acp --agent search_agent
+
+# Without --agent the built-in Eino agent is served (the same default as
+# `eino` / `eino agent`); only a configured model is required
+eino-cli acp
 ```
+
+In ACP mode the built-in agent does not enable `ask_user` / `todolist`, since both need an interactive UI.
 
 Example Zed configuration (`settings.json`):
 

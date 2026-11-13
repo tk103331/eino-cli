@@ -103,11 +103,15 @@ TUI 内支持斜杠命令（输入 `/` 会显示命令面板与参数候选）�
 | `/model <name>` | 切换模型（无需重启） |
 | `/skill <name>` | 启用配置中的 skill；`/skill off` 关闭 |
 | `/resume [id\|编号]` | 列出或恢复历史会话（会一并恢复对话上下文） |
-| `/theme <name> [light\|dark]` | 切换颜色主题（每套主题均含明暗两套配色） |
+| `/theme <name> [light\|dark]` | 切换颜色主题（每套主题均含明暗两套配色）：`violet`（默认）、`catppuccin`、`nord`、`gruvbox`、`tokyo-night`、`dracula`、`mono` |
 | `/tools` | 列出当前可用工具 |
 | `/status` | 显示当前 agent/model/skill/会话 |
 
 用 `/model` 切换的模型会被记住：按 agent 保存在 `~/.eino-cli/agent_models.json`，下次启动自动沿用。只有「模型为默认模型」的 agent 会记住（`default_model`，未设置时取排序第一个模型）；在 `config.yml` 中为 agent 显式指定了 `model:` 的，始终以配置为准。
+
+顶栏标题旁始终显示当前 `agent · 模型`（如 `◆ Eino CLI Agent · Eino · qwen-local`），`/agent`、`/model`、`/resume` 切换后立即更新；终端过窄时会自动截断，不会挤掉右侧状态。
+
+回复生成过程中按两次 `Esc` 可停止：第一次只显示提示，两秒内再按一次即取消本次回复，已生成的内容会保留。
 
 TUI 默认**不捕获鼠标**，可直接用终端鼠标选择并复制文本；同时自动开启终端「备用屏幕滚轮转发」（DECSET 1007），在支持的终端（iTerm2、Kitty、WezTerm、xterm 等）中滚轮可直接滚动对话，无需按键。若终端不支持 1007，可用 ↑↓/PgUp/PgDn，或按 `Ctrl+Y` 开启鼠标捕获（再按一次关闭）。开启捕获后，点击思考块、工具调用行或错误行即可展开/折叠（等同于 `Tab` + `Ctrl+O`）；错误默认折叠为第一行。
 
@@ -194,6 +198,9 @@ eino-cli run --agent test_agent --prompt "你好，请帮我搜索一下今天�
 - `--agent, -a`: 指定要运行的 Agent 名称（必需）
 - `--prompt, -p`: 指定 Agent 的输入提示（必需）
 - `--config`: 指定配置文件路径（可选，默认为 ~/.eino-cli/config.yml）
+- `--cwd, -C`: 指定工作目录（可选，默认为当前目录）。工具的相对路径以此为基准，如 `eino -C ~/project`
+
+也可以直接作为位置参数：`eino ~/project`、`eino agent ~/project`。同时给出 `--cwd` 和位置参数会报错；`run` 子命令仍只使用参数形式。
 
 ### 4. ACP Agent 模式（供 Zed 等编辑器接入）
 
@@ -201,9 +208,15 @@ eino-cli run --agent test_agent --prompt "你好，请帮我搜索一下今天�
 它通过 stdio 使用 JSON-RPC 2.0 通信，任何 ACP 客户端（如 Zed 编辑器）都可以创建会话、发送提示，并接收流式响应和工具调用事件。
 
 ```bash
-# 以 ACP 方式暴露某个 agent（不指定时若只配置了一个 agent 则默认使用它）
+# 以 ACP 方式暴露某个 agent
 eino-cli acp --agent search_agent
+
+# 不指定 --agent 时使用内置的 Eino agent（与 `eino` / `eino agent` 的默认 agent 相同），
+# 只要配置了模型即可直接使用
+eino-cli acp
 ```
+
+内置 agent 在 ACP 模式下不启用 `ask_user` / `todolist`（这两个工具依赖交互界面）。
 
 Zed 配置示例（`settings.json`）：
 
