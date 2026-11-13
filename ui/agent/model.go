@@ -85,6 +85,11 @@ type ViewModel struct {
 	// Ctrl+C confirmation: the first press only arms quit.
 	confirmQuit bool
 
+	// Esc confirmation while a reply runs: the first press only arms the
+	// interrupt, a second press within stopArmTimeout stops the agent.
+	stopArmed   bool
+	onInterrupt func()
+
 	// Mouse capture toggle (off by default so text selection works).
 	onToggleMouse func() bool
 
@@ -116,6 +121,9 @@ type StreamChunkMsg string
 type ReasoningChunkMsg string
 type StreamEndMsg struct{}
 type ErrorMsg string
+
+// NoticeMsg appends an informational line to the transcript.
+type NoticeMsg string
 type ToolStartMsg struct {
 	Name      string
 	Arguments string
@@ -185,6 +193,19 @@ func confirmQuitTick() tea.Cmd {
 	})
 }
 
+// stopArmTimeoutMsg disarms a pending Esc-to-stop confirmation.
+type stopArmTimeoutMsg struct{}
+
+// stopArmTimeout is how long the "press Esc again to stop" hint stays armed.
+const stopArmTimeout = 2 * time.Second
+
+// stopArmTick schedules the stop-confirmation timeout.
+func stopArmTick() tea.Cmd {
+	return tea.Tick(stopArmTimeout, func(time.Time) tea.Msg {
+		return stopArmTimeoutMsg{}
+	})
+}
+
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // renderInterval throttles expensive markdown re-rendering during streaming.
@@ -218,6 +239,12 @@ func (m *ViewModel) markDirty() {
 // SetOnClear registers a callback invoked whenever the transcript is cleared.
 func (m *ViewModel) SetOnClear(fn func()) {
 	m.onClear = fn
+}
+
+// SetOnInterrupt registers the callback invoked when the user stops a running
+// reply with Esc twice.
+func (m *ViewModel) SetOnInterrupt(fn func()) {
+	m.onInterrupt = fn
 }
 
 // SetTranscript replaces the conversation with the given messages (used when
@@ -607,6 +634,13 @@ func (m *ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case stopArmTimeoutMsg:
+		if m.stopArmed {
+			m.stopArmed = false
+			m.markDirty()
+		}
+		return m, nil
+
 	case AskQuestionMsg:
 		// One question at a time: a second tool asking concurrently is told
 		// to proceed without an answer instead of deadlocking.
@@ -664,6 +698,27 @@ func (m *ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// option, enter submits, esc cancels, typing switches to free text.
 		if m.question != nil && m.handleQuestionKey(msg) {
 			return m, nil
+		}
+
+		// Esc twice stops a running reply: the first press only arms the
+		// interrupt, the second one within stopArmTimeout cancels the agent.
+		if msg.Type == tea.KeyEsc && m.isWaiting {
+			if m.stopArmed {
+				m.stopArmed = false
+				m.markDirty()
+				if m.onInterrupt != nil {
+					m.onInterrupt()
+				}
+				return m, nil
+			}
+			m.stopArmed = true
+			m.markDirty()
+			return m, stopArmTick()
+		}
+		// Any other key cancels the pending stop confirmation.
+		if m.stopArmed {
+			m.stopArmed = false
+			m.markDirty()
 		}
 
 		// Esc never quits: it only dismisses the command palette/input.
@@ -860,6 +915,7 @@ func (m *ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Content: string(msg),
 		})
 		m.isWaiting = false
+		m.stopArmed = false
 		m.streamingContent = ""
 		m.scrollOffset = 0
 		m.markDirty()
@@ -889,6 +945,7 @@ func (m *ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.streamingContent = ""
 		}
 		m.isWaiting = false
+		m.stopArmed = false
 		m.scrollOffset = 0
 		m.markDirty()
 		m.lastRender = time.Time{}
@@ -967,6 +1024,12 @@ func (m *ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.markDirty()
 		return m, nil
 
+	case NoticeMsg:
+		m.messages = append(m.messages, Message{Type: InfoMessage, Content: string(msg)})
+		m.markDirty()
+		m.lastRender = time.Time{}
+		return m, nil
+
 	case ErrorMsg:
 		// Error message - display all error messages (filtering handled at application layer)
 		errorText := string(msg)
@@ -976,6 +1039,7 @@ func (m *ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Content: errorText,
 		})
 		m.isWaiting = false
+		m.stopArmed = false
 		m.streamingContent = ""
 		m.errorMsg = errorText
 		m.markDirty()
@@ -1363,7 +1427,12 @@ func (m *ViewModel) renderReasoningMessage(msg *Message, index int, streaming bo
 		// Folded: show a single-line snippet of the reasoning instead of
 		// just a size summary.
 		preview := firstLine(msg.Content)
+		// Room for the snippet on the header row: plain label + " · ", plus
+		// the leading space the selection band adds.
 		maxW := m.width - lipgloss.Width(plain) - 3
+		if m.selected == index {
+			maxW--
+		}
 		if maxW < 16 {
 			maxW = 16
 		}
@@ -1416,17 +1485,21 @@ func foldGlyph(expanded bool) string {
 	return "▸"
 }
 
-// highlightRow renders the selected foldable row as a full-width bar, so the
-// Tab selection is visible across the whole line instead of on the marker.
+// highlightRow renders the selected foldable row as a full-width band, so the
+// Tab selection is visible across the whole line. The band is a low-contrast
+// neutral gray: a saturated theme color here turned the row into a loud bar.
 func (m *ViewModel) highlightRow(text string) string {
-	fg := "#FFFFFF"
+	// ANSI palette colors instead of hex: they stay subtle on both 256-color
+	// and truecolor terminals and never collapse into a saturated theme hue.
+	bg := "253" // light terminal: soft gray band
+	fg := "236"
 	if m.darkMode {
-		fg = "#111827" // dark text reads better on the light-ish dark palettes
+		bg = "237"
+		fg = "252"
 	}
 	style := lipgloss.NewStyle().
-		Background(lipgloss.Color(m.theme.Primary)).
-		Foreground(lipgloss.Color(fg)).
-		Bold(true)
+		Background(lipgloss.Color(bg)).
+		Foreground(lipgloss.Color(fg))
 	if m.width > 0 {
 		style = style.Width(m.width)
 	}
@@ -1723,12 +1796,15 @@ func (m *ViewModel) View() string {
 		statusText = "error"
 		statusDot = m.theme.Error
 	}
-	title := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Primary)).Bold(true).Render("◆ Eino CLI Agent")
-	if m.subtitle != "" {
-		title += m.muted().Render(" · " + m.subtitle)
-	}
+	const titleText = "◆ Eino CLI Agent"
 	dot := lipgloss.NewStyle().Foreground(lipgloss.Color(statusDot)).Render("●")
 	status := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).Render(dot + " " + statusText)
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Primary)).Bold(true).Render(titleText)
+	if m.subtitle != "" {
+		// Keep the subtitle (agent · model) on the same row as the status.
+		room := m.width - 2 - lipgloss.Width(titleText) - lipgloss.Width(dot+" "+statusText) - 4
+		title += m.muted().Render(" · " + truncate(m.subtitle, maxInt(room, 8)))
+	}
 	header := joinRow(title, status, m.width-2)
 	rule := m.muted().Render(strings.Repeat("─", maxInt(m.width-2, 3)))
 
@@ -1751,7 +1827,11 @@ func (m *ViewModel) View() string {
 			inputLine = ansi.TruncateLeft(inputLine, w-maxCells, "…")
 		}
 	} else if m.isWaiting {
-		inputLine = m.muted().Render("⏳ waiting for response... (ctrl+c to quit)")
+		if m.stopArmed {
+			inputLine = m.warningStyle(true).Render("⚠ 再按一次 Esc 停止当前回复（任意其他键取消）")
+		} else {
+			inputLine = m.muted().Render("⏳ waiting for response... (esc esc to stop · ctrl+c to quit)")
+		}
 	} else {
 		prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Primary)).Bold(true).Render("❯")
 		inputLine = prompt + " " + m.renderEditableInput()
@@ -1861,14 +1941,14 @@ func wrapLines(lines []string, width int) []string {
 		return lines
 	}
 	limit := width - 4
+	if limit < 1 {
+		limit = 1
+	}
 	var out []string
 	for _, line := range lines {
-		runes := []rune(line)
-		for len(runes) > limit {
-			out = append(out, string(runes[:limit]))
-			runes = runes[limit:]
-		}
-		out = append(out, string(runes))
+		// Wrap by display cells: every rendered row must stay within the
+		// terminal width, or the viewport math below miscounts.
+		out = append(out, strings.Split(ansi.Hardwrap(line, limit, true), "\n")...)
 	}
 	return out
 }
@@ -1884,13 +1964,20 @@ func firstLine(text string) string {
 	return ""
 }
 
-// truncate cuts a string to maxLen runes with an ellipsis.
-func truncate(s string, maxLen int) string {
-	runes := []rune(s)
-	if len(runes) <= maxLen {
+// truncate cuts plain text to maxWidth terminal cells with an ellipsis.
+// Widths are cells, not runes: CJK text occupies two cells per character, so
+// rune-based truncation used to overflow the row and wrap onto a second line.
+func truncate(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= maxWidth {
 		return s
 	}
-	return string(runes[:maxLen-1]) + "…"
+	if maxWidth == 1 {
+		return "…"
+	}
+	return ansi.Truncate(s, maxWidth, "…")
 }
 
 func maxInt(a, b int) int {

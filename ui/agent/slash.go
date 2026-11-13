@@ -190,7 +190,7 @@ func (app *AgentApp) executeSlash(input string) CommandResult {
 		_ = state.SetLastAgent(arg) // remember for the next no-argument start
 		app.syncSessionConfig()
 		app.registerCommands()
-		return CommandResult{Message: "已切换到 agent: " + arg, Subtitle: arg}
+		return CommandResult{Message: "已切换到 agent: " + arg, Subtitle: app.headerSubtitle()}
 
 	case "model":
 		if arg == "" {
@@ -210,7 +210,7 @@ func (app *AgentApp) executeSlash(input string) CommandResult {
 		if cfg.AgentUsesDefaultModel(app.agentName) {
 			msg += "（已记住，下次启动沿用）"
 		}
-		return CommandResult{Message: msg}
+		return CommandResult{Message: msg, Subtitle: app.headerSubtitle()}
 
 	case "skill":
 		if arg == "" {
@@ -350,7 +350,7 @@ func (app *AgentApp) resumeSession(arg string) CommandResult {
 
 	app.model.SetTranscript(sessionTranscript(s))
 	app.model.SetTodos(viewTodos(s.Todos()))
-	app.model.SetSubtitle(app.agentName)
+	app.refreshSubtitle()
 	app.registerCommands()
 
 	return CommandResult{Message: fmt.Sprintf("已恢复会话 %s（agent: %s，%d 条消息）", s.ID, app.agentName, s.TurnCount())}

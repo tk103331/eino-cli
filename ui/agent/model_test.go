@@ -226,6 +226,71 @@ func TestReasoningDisplay(t *testing.T) {
 	}
 }
 
+func TestSelectedThinkingPreviewStaysOneLine(t *testing.T) {
+	const width = 100
+	m := NewViewModel(func(string) error { return nil })
+	m = drive(m, tea.WindowSizeMsg{Width: width, Height: 30})
+	m = drive(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hi")})
+	m = drive(m, tea.KeyMsg{Type: tea.KeyEnter})
+	// CJK text takes two cells per rune, so a rune-based cut overflowed the row.
+	long := strings.Repeat("这是一个很长的中文思考内容，", 8)
+	m = drive(m, ReasoningChunkMsg(long))
+	m = drive(m, StreamChunkMsg("好"))
+	m = drive(m, StreamEndMsg{})
+	m = drive(m, tea.KeyMsg{Type: tea.KeyTab})
+
+	lines := strings.Split(m.View(), "\n")
+	headLine := -1
+	for i, line := range lines {
+		if strings.Contains(line, "Thinking") {
+			headLine = i
+			if w := lipgloss.Width(line); w != width {
+				t.Fatalf("thinking head width = %d, want %d (preview wrapped)", w, width)
+			}
+		}
+		if i != headLine && strings.Contains(line, "这是一个很长的中文思考内容") {
+			t.Fatalf("preview spilled onto another line: %q", line)
+		}
+	}
+	if headLine < 0 {
+		t.Fatalf("thinking block missing:\n%s", m.View())
+	}
+}
+
+func TestSelectedExpandedReasoningHighlightsHeadOnly(t *testing.T) {
+	m := NewViewModel(func(string) error { return nil })
+	m = drive(m, tea.WindowSizeMsg{Width: 80, Height: 30})
+	m = drive(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hi")})
+	m = drive(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = drive(m, ReasoningChunkMsg("想法一\n想法二"))
+	m = drive(m, StreamChunkMsg("好的"))
+	m = drive(m, StreamEndMsg{})
+
+	m = drive(m, tea.KeyMsg{Type: tea.KeyTab})
+	m = drive(m, tea.KeyMsg{Type: tea.KeyCtrlO})
+
+	var head, body string
+	for _, line := range strings.Split(m.View(), "\n") {
+		switch {
+		case strings.Contains(line, "Thinking"):
+			head = line
+		case strings.Contains(line, "想法二"):
+			body = line
+		}
+	}
+	if head == "" || body == "" {
+		t.Fatalf("expanded reasoning block missing:\n%s", m.View())
+	}
+	// The selection band covers the head row only; the text of the thinking
+	// body stays unhighlighted.
+	if w := lipgloss.Width(head); w != 80 {
+		t.Fatalf("selected head row width = %d, want the full 80 columns", w)
+	}
+	if w := lipgloss.Width(body); w >= 80 {
+		t.Fatalf("reasoning body must not be highlighted, width = %d", w)
+	}
+}
+
 func TestCollapsibleToolCall(t *testing.T) {
 	m := NewViewModel(func(string) error { return nil })
 	m = drive(m, tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -465,5 +530,50 @@ func TestSelectedFoldableRowIsHighlighted(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("tool row missing:\n%s", m.View())
+	}
+}
+
+// Esc twice stops a running reply; one press only arms the confirmation.
+func TestDoubleEscStopsRunningReply(t *testing.T) {
+	sent := 0
+	m := NewViewModel(func(string) error { sent++; return nil })
+	m = drive(m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	stopped := 0
+	m.SetOnInterrupt(func() { stopped++ })
+
+	m = drive(m,
+		tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("run")},
+		tea.KeyMsg{Type: tea.KeyEnter},
+	)
+	if !m.isWaiting {
+		t.Fatal("turn should be running")
+	}
+
+	m = drive(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if stopped != 0 {
+		t.Fatal("a single Esc must not stop the reply")
+	}
+	if !m.stopArmed || !strings.Contains(m.View(), "再按一次 Esc") {
+		t.Fatalf("first Esc should arm the stop hint:\n%s", m.View())
+	}
+
+	m = drive(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if stopped != 1 {
+		t.Fatalf("second Esc should interrupt, stopped=%d", stopped)
+	}
+	if m.stopArmed {
+		t.Fatal("stop confirmation should be disarmed after interrupting")
+	}
+
+	// The stream end clears the waiting state and the hint.
+	m = drive(m, StreamEndMsg{})
+	if out := m.View(); m.isWaiting || strings.Contains(out, "再按一次 Esc") {
+		t.Fatalf("waiting state not cleared:\n%s", out)
+	}
+
+	// Esc keeps its normal meaning when nothing is running.
+	m = drive(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.stopArmed || stopped != 1 {
+		t.Fatal("Esc outside a run must not arm or interrupt")
 	}
 }

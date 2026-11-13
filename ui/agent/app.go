@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -28,6 +29,10 @@ type AgentApp struct {
 
 	// Tool approvals granted "for this session" (in memory only).
 	approvals approver
+
+	// cancelRun stops the in-flight turn (Esc twice in the TUI).
+	runMu     sync.Mutex
+	cancelRun context.CancelFunc
 
 	sessionMu sync.Mutex
 	sess      *session.Session // persisted current conversation
@@ -75,10 +80,11 @@ func NewAgentApp(agentName string) (*AgentApp, error) {
 
 	// Create Agent model, passing in the callback function for sending messages
 	agentModel := NewViewModel(app.sendMessage)
-	agentModel.SetSubtitle(agentName)
+	agentModel.SetSubtitle(app.headerSubtitle())
 	app.model = agentModel
 	agentModel.SetMouseToggle(app.toggleMouse)
 	agentModel.SetOnClear(app.startNewSession)
+	agentModel.SetOnInterrupt(app.Interrupt)
 	app.registerCommands()
 
 	// Create Bubble Tea program
@@ -86,6 +92,35 @@ func NewAgentApp(agentName string) (*AgentApp, error) {
 
 	logger.Info("UI-AGENT", fmt.Sprintf("Agent app created successfully: %s", agentName))
 	return app, nil
+}
+
+// headerSubtitle is the label next to the window title: the active agent and
+// the model actually in use (a /model switch or a remembered choice wins over
+// the configured default).
+func (app *AgentApp) headerSubtitle() string {
+	return headerLabel(app.agentName, app.currentModelName())
+}
+
+// headerLabel joins the agent and model names, skipping empty parts.
+func headerLabel(agentName, modelName string) string {
+	agentName = strings.TrimSpace(agentName)
+	modelName = strings.TrimSpace(modelName)
+	switch {
+	case agentName == "":
+		return modelName
+	case modelName == "":
+		return agentName
+	case agentName == modelName:
+		return agentName
+	}
+	return agentName + " · " + modelName
+}
+
+// refreshSubtitle keeps the header in sync after an agent/model switch.
+func (app *AgentApp) refreshSubtitle() {
+	if app.model != nil {
+		app.model.SetSubtitle(app.headerSubtitle())
+	}
 }
 
 // toggleMouse flips mouse capture and returns the new state.
@@ -134,14 +169,40 @@ func (app *AgentApp) sendMessage(message string) error {
 	history := app.historySnapshot()
 	app.recordTurn(session.RoleUser, message)
 
+	// Each turn gets its own context so Esc twice can cancel it without
+	// affecting the app's lifetime.
+	ctx, cancel := context.WithCancel(app.ctx)
+	app.runMu.Lock()
+	app.cancelRun = cancel
+	app.runMu.Unlock()
+
 	// Handle conversation in goroutine to avoid blocking UI
-	go app.processConversation(history, message)
+	go func() {
+		defer func() {
+			cancel()
+			app.runMu.Lock()
+			app.cancelRun = nil
+			app.runMu.Unlock()
+		}()
+		app.processConversation(ctx, history, message)
+	}()
 
 	return nil
 }
 
+// Interrupt stops the reply that is currently streaming, if any.
+func (app *AgentApp) Interrupt() {
+	app.runMu.Lock()
+	cancel := app.cancelRun
+	app.runMu.Unlock()
+	if cancel != nil {
+		logger.Info("UI-AGENT", "Interrupting the running reply")
+		cancel()
+	}
+}
+
 // processConversation handles conversation (using streaming output)
-func (app *AgentApp) processConversation(history []*schema.Message, prompt string) {
+func (app *AgentApp) processConversation(ctx context.Context, history []*schema.Message, prompt string) {
 	logger.Info("UI-AGENT", "Starting conversation processing")
 
 	if prompt == "" {
@@ -284,10 +345,21 @@ func (app *AgentApp) processConversation(history []*schema.Message, prompt strin
 	// Use Agent's ChatStream method for streaming conversation. The context
 	// carries the host so ask_user/todolist can reach the TUI.
 	logger.Info("UI-AGENT", "Calling agent ChatStream")
-	ctx := tools.WithHost(app.ctx, app)
+	ctx = tools.WithHost(ctx, app)
 	err := app.agent.ChatStream(ctx, history, prompt, chunkCallback, toolCallback)
 	flushThought()
 	if err != nil {
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			// Stopped by the user: keep whatever streamed so far instead of
+			// reporting a failure.
+			logger.Info("UI-AGENT", "Reply stopped by user")
+			app.program.Send(StreamEndMsg{})
+			if answer.Len() > 0 {
+				app.recordTurn(session.RoleAssistant, answer.String())
+			}
+			app.program.Send(NoticeMsg("已停止当前回复"))
+			return
+		}
 		logger.Error("UI-AGENT", fmt.Sprintf("AI response error: %v", err))
 		app.program.Send(ErrorMsg(fmt.Sprintf("AI response error: %v", err)))
 	} else {
