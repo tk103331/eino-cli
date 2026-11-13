@@ -17,10 +17,10 @@ sha_for() {
   awk -v f="$1" '$2 == f { print $1 }' "${workdir}/checksums.txt"
 }
 
-DARWIN_ARM64="$(sha_for eino-darwin-arm64)"
-DARWIN_AMD64="$(sha_for eino-darwin-amd64)"
-LINUX_ARM64="$(sha_for eino-linux-arm64)"
-LINUX_AMD64="$(sha_for eino-linux-amd64)"
+DARWIN_ARM64="$(sha_for "eino_${VERSION_NO_V}_darwin_arm64.tar.gz")"
+DARWIN_AMD64="$(sha_for "eino_${VERSION_NO_V}_darwin_amd64.tar.gz")"
+LINUX_ARM64="$(sha_for "eino_${VERSION_NO_V}_linux_arm64.tar.gz")"
+LINUX_AMD64="$(sha_for "eino_${VERSION_NO_V}_linux_amd64.tar.gz")"
 
 if [ -z "${DARWIN_ARM64}" ] || [ -z "${DARWIN_AMD64}" ] || [ -z "${LINUX_ARM64}" ] || [ -z "${LINUX_AMD64}" ]; then
   echo "missing checksums in ${BASE}/checksums.txt" >&2

@@ -50,7 +50,7 @@ git tag v0.1.0 && git push --tags
 ```
 
 GitHub Actions (`.github/workflows/release.yml`) will:
-1. build `eino` / `eino-cli` binaries for darwin/linux × amd64/arm64 with goreleaser and create a Release
+1. build `eino` / `eino-cli` binaries for darwin/linux × amd64/arm64 with goreleaser, pack them as `eino_<version>_<os>_<arch>.tar.gz` / `eino-cli_<version>_<os>_<arch>.tar.gz` (~15 MB instead of the ~50 MB stripped binary) and create a Release
 2. publish the npm package via OIDC when the repository variable `NPM_TRUSTED_PUBLISHING=true` is set and the npm package has a GitHub Actions trusted publisher (version taken from the tag, no token needed)
 3. update the `tk103331/homebrew-tap` formula when the `TAP_GITHUB_TOKEN` secret is configured
 
@@ -65,6 +65,12 @@ git clone https://github.com/tk103331/eino-cli.git
 cd eino-cli
 go install ./cmd/eino    # produces `eino`
 go install .             # produces `eino-cli`
+```
+
+For a smaller local binary, build with `-trimpath -ldflags="-s -w"` (~50 MB instead of ~70 MB):
+
+```bash
+go build -trimpath -ldflags="-s -w" -o eino ./cmd/eino
 ```
 
 ## Usage

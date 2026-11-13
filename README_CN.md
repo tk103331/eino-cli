@@ -50,7 +50,7 @@ git tag v0.1.0 && git push --tags
 ```
 
 GitHub Actions（`.github/workflows/release.yml`）会自动完成：
-1. goreleaser 构建 darwin/linux × amd64/arm64 的 `eino` / `eino-cli` 二进制并创建 Release
+1. goreleaser 构建 darwin/linux × amd64/arm64 的 `eino` / `eino-cli` 二进制，打包为 `eino_<version>_<os>_<arch>.tar.gz` / `eino-cli_<version>_<os>_<arch>.tar.gz`（约 15 MB，未压缩的 stripped 二进制约 50 MB）并创建 Release
 2. 配置了仓库变量 `NPM_TRUSTED_PUBLISHING=true`（且 npm 包已配置 Trusted Publisher）时，通过 OIDC 发布 npm 包（版本号取自 tag，无需任何 token）
 3. 配置了 `TAP_GITHUB_TOKEN` secret 时更新 `tk103331/homebrew-tap` 的 formula
 
@@ -65,6 +65,12 @@ git clone https://github.com/tk103331/eino-cli.git
 cd eino-cli
 go install ./cmd/eino    # 生成 eino
 go install .             # 生成 eino-cli
+```
+
+本地想要更小的二进制，可加上 `-trimpath -ldflags="-s -w"`（约 50 MB，默认约 70 MB）：
+
+```bash
+go build -trimpath -ldflags="-s -w" -o eino ./cmd/eino
 ```
 
 ## 使用方法

@@ -19,6 +19,8 @@ builds:
     goarch:
       - amd64
       - arm64
+    flags:
+      - -trimpath
     ldflags:
       - -s -w -X github.com/tk103331/eino-cli/version.Version={{ .Version }}
 
@@ -34,13 +36,23 @@ builds:
     goarch:
       - amd64
       - arm64
+    flags:
+      - -trimpath
     ldflags:
       - -s -w -X github.com/tk103331/eino-cli/version.Version={{ .Version }}
 
-# Publish raw binaries so the npm wrapper can download them directly.
+# Ship compressed archives: a stripped binary is ~50 MB, while gzip brings the
+# download down to ~15 MB. The npm installer and the Homebrew formula unpack
+# `eino` from eino_<version>_<os>_<arch>.tar.gz.
 archives:
-  - formats: [binary]
-    name_template: "{{ .Binary }}-{{ .Os }}-{{ .Arch }}"
+  - id: eino
+    ids: [eino]
+    formats: [tar.gz]
+    name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - id: eino-cli
+    ids: [eino-cli]
+    formats: [tar.gz]
+    name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: checksums.txt

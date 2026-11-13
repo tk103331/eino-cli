@@ -16,7 +16,7 @@ function platformTarget() {
   if (!os || !arch) {
     return null;
   }
-  return { os, arch, name: `${BINARY}-${os}-${arch}` };
+  return { os, arch };
 }
 
 function version() {
@@ -27,12 +27,21 @@ function vendorDir() {
   return path.join(__dirname, '..', 'vendor');
 }
 
-function binaryPath() {
+// assetName mirrors the goreleaser archive naming:
+// eino_<version>_<os>_<arch>.tar.gz.
+function assetName(v) {
   const target = platformTarget();
   if (!target) {
     return null;
   }
-  return path.join(vendorDir(), target.name);
+  return `${BINARY}_${v}_${target.os}_${target.arch}.tar.gz`;
+}
+
+function binaryPath() {
+  if (!platformTarget()) {
+    return null;
+  }
+  return path.join(vendorDir(), BINARY);
 }
 
 function download(url, dest) {
@@ -48,12 +57,21 @@ function download(url, dest) {
       throw new Error(`failed to download ${url} (curl/wget unavailable)`);
     }
   }
-  fs.chmodSync(tmp, 0o755);
+  fs.chmodSync(tmp, 0o644);
   fs.renameSync(tmp, dest);
 }
 
-// ensureBinarySync returns the path to the platform binary, downloading it
-// from the GitHub release on first use.
+function extract(archive, dir) {
+  try {
+    // Only unpack the binary; the archive also carries the docs.
+    execFileSync('tar', ['-xzf', archive, '-C', dir, BINARY], { stdio: 'ignore' });
+  } catch (err) {
+    throw new Error(`failed to extract ${archive} (tar unavailable): ${err.message}`);
+  }
+}
+
+// ensureBinarySync returns the path to the platform binary, downloading and
+// unpacking the release archive on first use.
 function ensureBinarySync() {
   const target = platformTarget();
   if (!target) {
@@ -66,9 +84,14 @@ function ensureBinarySync() {
     return dest;
   }
   const v = version();
-  const url = `https://github.com/${REPO}/releases/download/v${v}/${target.name}`;
-  download(url, dest);
+  const archiveName = assetName(v);
+  const url = `https://github.com/${REPO}/releases/download/v${v}/${archiveName}`;
+  const archive = path.join(vendorDir(), archiveName);
+  download(url, archive);
+  extract(archive, vendorDir());
+  fs.rmSync(archive, { force: true });
+  fs.chmodSync(dest, 0o755);
   return dest;
 }
 
-module.exports = { ensureBinarySync, binaryPath, platformTarget, version };
+module.exports = { ensureBinarySync, binaryPath, platformTarget, assetName, version };
