@@ -29,11 +29,14 @@ type Theme struct {
 // defaultThemeName is used when no theme has been selected.
 const defaultThemeName = "violet"
 
-// themeRegistry lists built-in themes in palette order.
+// themeRegistry lists built-in themes in palette order. Each entry is a
+// complete, cohesive terminal palette with a matching light companion
+// (Catppuccin Mocha/Latte, Nord, Gruvbox, Tokyo Night, Dracula/Alucard), so
+// the accent colors stay harmonious instead of mixing unrelated hues.
 var themeRegistry = []Theme{
 	{
 		Name:        "violet",
-		Description: "紫罗兰",
+		Description: "紫罗兰（默认）",
 		Light: ThemeVariant{
 			Primary: "#7C3AED", Accent: "#0891B2", Success: "#059669",
 			Warning: "#D97706", Error: "#DC2626", User: "#7C3AED", Muted: "#6B7280",
@@ -44,39 +47,68 @@ var themeRegistry = []Theme{
 		},
 	},
 	{
-		Name:        "ocean",
-		Description: "海洋",
+		// Catppuccin Mocha / Latte: mauve + blue, pastel accents.
+		Name:        "catppuccin",
+		Description: "Catppuccin",
 		Light: ThemeVariant{
-			Primary: "#2563EB", Accent: "#0D9488", Success: "#059669",
-			Warning: "#D97706", Error: "#DC2626", User: "#2563EB", Muted: "#64748B",
+			Primary: "#8839EF", Accent: "#1E66F5", Success: "#40A02B",
+			Warning: "#DF8E1D", Error: "#D20F39", User: "#D156A8", Muted: "#6C6F85",
 		},
 		Dark: ThemeVariant{
-			Primary: "#60A5FA", Accent: "#2DD4BF", Success: "#34D399",
-			Warning: "#FBBF24", Error: "#F87171", User: "#60A5FA", Muted: "#94A3B8",
+			Primary: "#CBA6F7", Accent: "#89B4FA", Success: "#A6E3A1",
+			Warning: "#F9E2AF", Error: "#F38BA8", User: "#F5C2E7", Muted: "#A6ADC8",
 		},
 	},
 	{
-		Name:        "forest",
-		Description: "森林",
+		// Nord: frost blue against aurora accents.
+		Name:        "nord",
+		Description: "Nord",
 		Light: ThemeVariant{
-			Primary: "#15803D", Accent: "#0F766E", Success: "#16A34A",
-			Warning: "#CA8A04", Error: "#DC2626", User: "#15803D", Muted: "#6B7280",
+			Primary: "#5E81AC", Accent: "#8F6E96", Success: "#6E8B4C",
+			Warning: "#C08A3E", Error: "#BF616A", User: "#8F6E96", Muted: "#5B6678",
 		},
 		Dark: ThemeVariant{
-			Primary: "#4ADE80", Accent: "#5EEAD4", Success: "#4ADE80",
-			Warning: "#FDE047", Error: "#F87171", User: "#4ADE80", Muted: "#9CA3AF",
+			Primary: "#88C0D0", Accent: "#81A1C1", Success: "#A3BE8C",
+			Warning: "#EBCB8B", Error: "#BF616A", User: "#B48EAD", Muted: "#9AA5B8",
 		},
 	},
 	{
-		Name:        "sunset",
-		Description: "日落",
+		// Gruvbox dark / light: warm background, muted retro accents.
+		Name:        "gruvbox",
+		Description: "Gruvbox",
 		Light: ThemeVariant{
-			Primary: "#C2410C", Accent: "#BE185D", Success: "#059669",
-			Warning: "#B45309", Error: "#DC2626", User: "#C2410C", Muted: "#78716C",
+			Primary: "#8F3F71", Accent: "#076678", Success: "#79740E",
+			Warning: "#B57614", Error: "#9D0006", User: "#AF3A03", Muted: "#7C6F64",
 		},
 		Dark: ThemeVariant{
-			Primary: "#FB923C", Accent: "#F472B6", Success: "#34D399",
-			Warning: "#FBBF24", Error: "#F87171", User: "#FB923C", Muted: "#A8A29E",
+			Primary: "#D3869B", Accent: "#83A598", Success: "#B8BB26",
+			Warning: "#FABD2F", Error: "#FB4934", User: "#FE8019", Muted: "#928374",
+		},
+	},
+	{
+		// Tokyo Night / Day.
+		Name:        "tokyo-night",
+		Description: "Tokyo Night",
+		Light: ThemeVariant{
+			Primary: "#9854F1", Accent: "#2E7DE9", Success: "#587539",
+			Warning: "#B15C00", Error: "#F52A65", User: "#007197", Muted: "#5F6B94",
+		},
+		Dark: ThemeVariant{
+			Primary: "#BB9AF7", Accent: "#7AA2F7", Success: "#9ECE6A",
+			Warning: "#E0AF68", Error: "#F7768E", User: "#2AC3DE", Muted: "#737AA2",
+		},
+	},
+	{
+		// Dracula / Alucard.
+		Name:        "dracula",
+		Description: "Dracula",
+		Light: ThemeVariant{
+			Primary: "#644AC9", Accent: "#036A96", Success: "#14710A",
+			Warning: "#846E15", Error: "#CB3A2A", User: "#A3144D", Muted: "#6C664B",
+		},
+		Dark: ThemeVariant{
+			Primary: "#BD93F9", Accent: "#8BE9FD", Success: "#50FA7B",
+			Warning: "#FFB86C", Error: "#FF5555", User: "#FF79C6", Muted: "#6272A4",
 		},
 	},
 	{
