@@ -748,6 +748,11 @@ func (r *ReactAgent) ChatWithCallback(ctx context.Context, history []*schema.Mes
 			return "", fmt.Errorf("failed to receive stream message: %w", err)
 		}
 
+		// Reasoning-capable models (e.g. deepseek-reasoner) stream their
+		// thinking in ReasoningContent instead of <think> tags in Content.
+		if msg.ReasoningContent != "" && callback != nil {
+			callback(map[string]interface{}{"type": "reasoning", "content": msg.ReasoningContent})
+		}
 		if msg.Content != "" {
 			emit(tf.Feed(msg.Content))
 		}
@@ -860,6 +865,15 @@ func (r *ReactAgent) ChatStream(ctx context.Context, history []*schema.Message, 
 					logger.Debug("AGENT", fmt.Sprintf("Tool call #%d arguments: %s", i+1, tc.Function.Arguments))
 				}
 			}
+		}
+
+		// Reasoning-capable models (e.g. deepseek-reasoner) stream their
+		// thinking in ReasoningContent instead of <think> tags in Content.
+		if chunkCallback != nil && msg.ReasoningContent != "" {
+			chunkCallback(&StreamChunk{
+				Type:    "reasoning",
+				Content: msg.ReasoningContent,
+			})
 		}
 
 		// Send content chunk, splitting reasoning from the visible answer
