@@ -2,16 +2,16 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"strings"
+	"sync"
+
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/cloudwego/eino/components/model"
-	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/tk103331/eino-cli/agent"
 	"github.com/tk103331/eino-cli/config"
 	"github.com/tk103331/eino-cli/logger"
-	"github.com/tk103331/eino-cli/models"
+	"github.com/tk103331/eino-cli/session"
 	"github.com/tk103331/eino-cli/tools"
 )
 
@@ -25,21 +25,12 @@ type AgentApp struct {
 	model         *ViewModel
 	agent         agent.Agent
 	ctx           context.Context
-}
 
-// ChatApp represents the chat application structure (merged from chat functionality)
-type ChatApp struct {
-	modelFactory *models.Factory
-	agentFactory *agent.Factory
-	modelName    string
-	tools        []string
-	system       string
-	skill        string // active skill via /skill
-	mouseEnabled bool
-	program      *tea.Program
-	model        *ViewModel
-	chatModel    model.ToolCallingChatModel
-	reactAgent   agent.Agent
+	// Tool approvals granted "for this session" (in memory only).
+	approvals approver
+
+	sessionMu sync.Mutex
+	sess      *session.Session // persisted current conversation
 }
 
 // NewAgentApp creates a new Agent application
@@ -62,22 +53,24 @@ func NewAgentApp(agentName string) (*AgentApp, error) {
 	logger.Debug("UI-AGENT", fmt.Sprintf("Agent config: Model=%s, Tools=%v, MCP=%v",
 		agentConfig.Model, agentConfig.Tools, agentConfig.MCPServers))
 
-	// Create Agent factory
-	factory := agent.NewFactory(cfg)
-
-	// Create Agent instance
-	agentInstance, err := factory.CreateAgent(agentName)
-	if err != nil {
-		logger.Error("UI-AGENT", fmt.Sprintf("Failed to create agent: %v", err))
-		return nil, fmt.Errorf("failed to create Agent: %v", err)
-	}
+	// Interactive tools (ask_user / todolist) need config entries and a TUI host;
+	// they are added through the effective config so config files stay clean.
+	ensureInteractiveToolConfigs(cfg)
 
 	logger.Info("UI-AGENT", fmt.Sprintf("Successfully created agent: %s", agentName))
 
 	app := &AgentApp{
-		agentName: agentName,
-		agent:     agentInstance,
-		ctx:       context.Background(),
+		agentName:     agentName,
+		modelOverride: rememberedModel(cfg, agentName),
+		ctx:           context.Background(),
+	}
+	// The session header records the model actually in use, not the configured
+	// default that a remembered /model switch may override.
+	app.sess = session.New(session.KindAgent, agentName, app.currentModelName(), "")
+	// Build the agent from the effective config (interactive tools included).
+	if err := app.rebuildAgent(); err != nil {
+		logger.Error("UI-AGENT", fmt.Sprintf("Failed to create agent: %v", err))
+		return nil, fmt.Errorf("failed to create Agent: %v", err)
 	}
 
 	// Create Agent model, passing in the callback function for sending messages
@@ -85,6 +78,7 @@ func NewAgentApp(agentName string) (*AgentApp, error) {
 	agentModel.SetSubtitle(agentName)
 	app.model = agentModel
 	agentModel.SetMouseToggle(app.toggleMouse)
+	agentModel.SetOnClear(app.startNewSession)
 	app.registerCommands()
 
 	// Create Bubble Tea program
@@ -92,33 +86,6 @@ func NewAgentApp(agentName string) (*AgentApp, error) {
 
 	logger.Info("UI-AGENT", fmt.Sprintf("Agent app created successfully: %s", agentName))
 	return app, nil
-}
-
-// NewChatApp creates a new chat application (merged from chat functionality)
-func NewChatApp(modelName string, tools []string, system string) *ChatApp {
-	cfg := config.GetConfig()
-	factory := models.NewFactory(cfg)
-	agentFactory := agent.NewFactory(cfg)
-
-	app := &ChatApp{
-		modelFactory: factory,
-		agentFactory: agentFactory,
-		modelName:    modelName,
-		tools:        tools,
-		system:       system,
-	}
-
-	// Create chat model, passing in the callback function for sending messages
-	chatModel := NewViewModel(app.sendMessage)
-	chatModel.SetSubtitle(modelName)
-	app.model = chatModel
-	chatModel.SetMouseToggle(app.toggleMouse)
-	app.registerCommands()
-
-	// Create Bubble Tea program
-	app.program = tea.NewProgram(chatModel, tea.WithAltScreen())
-
-	return app
 }
 
 // toggleMouse flips mouse capture and returns the new state.
@@ -132,24 +99,8 @@ func (app *AgentApp) toggleMouse() bool {
 	return app.mouseEnabled
 }
 
-// toggleMouse flips mouse capture and returns the new state.
-func (app *ChatApp) toggleMouse() bool {
-	app.mouseEnabled = !app.mouseEnabled
-	if app.mouseEnabled {
-		app.program.EnableMouseCellMotion()
-	} else {
-		app.program.DisableMouseCellMotion()
-	}
-	return app.mouseEnabled
-}
-
 // Run runs the Agent application
 func (app *AgentApp) Run() error {
-	return runTUI(app.program)
-}
-
-// Run runs the Chat application (merged from chat functionality)
-func (app *ChatApp) Run() error {
 	return runTUI(app.program)
 }
 
@@ -176,47 +127,22 @@ func (app *AgentApp) sendMessage(message string) error {
 		return fmt.Errorf("Agent configuration does not exist: %s", app.agentName)
 	}
 
-	// Build message list
-	var messages []*schema.Message
-
-	// Add system message (if any)
+	// Log the system prompt and replay the persisted turns as context.
 	if agentConfig.System != "" {
-		messages = append(messages, schema.SystemMessage(agentConfig.System))
 		logger.Debug("UI-AGENT", fmt.Sprintf("Using system prompt: %s", truncateForLog(agentConfig.System)))
 	}
-
-	// Add user message
-	messages = append(messages, schema.UserMessage(message))
+	history := app.historySnapshot()
+	app.recordTurn(session.RoleUser, message)
 
 	// Handle conversation in goroutine to avoid blocking UI
-	go app.processConversation(messages)
+	go app.processConversation(history, message)
 
 	return nil
 }
 
-// sendMessage sends a message to AI model (for ChatApp use)
-func (app *ChatApp) sendMessage(message string) error {
-	// If there are tool configurations, use ReactAgent's ChatWithCallback method
-	if len(app.effectiveTools()) > 0 {
-		return app.sendMessageWithAgent(message)
-	}
-
-	// Otherwise use the original model direct call method
-	return app.sendMessageWithModel(message)
-}
-
 // processConversation handles conversation (using streaming output)
-func (app *AgentApp) processConversation(messages []*schema.Message) {
+func (app *AgentApp) processConversation(history []*schema.Message, prompt string) {
 	logger.Info("UI-AGENT", "Starting conversation processing")
-
-	// Get the last user message as prompt
-	var prompt string
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == schema.User {
-			prompt = messages[i].Content
-			break
-		}
-	}
 
 	if prompt == "" {
 		logger.Error("UI-AGENT", "User message not found in conversation")
@@ -225,6 +151,38 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 	}
 
 	logger.Info("UI-AGENT", fmt.Sprintf("Processing prompt: %s", truncateForLog(prompt)))
+
+	// Persisted reasoning is flushed as one event at each boundary (reasoning
+	// arrives token by token; one JSONL line per token would be wasteful).
+	var thought strings.Builder
+	flushThought := func() {
+		if thought.Len() == 0 {
+			return
+		}
+		app.recordReasoning(thought.String())
+		thought.Reset()
+	}
+
+	// The eino callback layer can emit the same tool start more than once.
+	// Track outstanding calls so the resumed transcript has no duplicates and
+	// every start can still be paired with its end.
+	pendingTools := make(map[string][]string)
+	recordToolStart := func(name, arguments string) {
+		flushThought()
+		for _, a := range pendingTools[name] {
+			if a == arguments {
+				return
+			}
+		}
+		pendingTools[name] = append(pendingTools[name], arguments)
+		app.recordToolStart(name, arguments)
+	}
+	recordToolEnd := func(name, result string, failed bool) {
+		if list := pendingTools[name]; len(list) > 0 {
+			pendingTools[name] = list[1:]
+		}
+		app.recordToolEnd(name, result, failed)
+	}
 
 	// Create tool call callback function
 	toolCallback := func(msg interface{}) {
@@ -240,6 +198,7 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 				case "start":
 					logger.Info("UI-TOOL", fmt.Sprintf("Starting: %s", v.Name))
 					logger.Debug("UI-TOOL", fmt.Sprintf("Arguments: %s", v.Arguments))
+					recordToolStart(v.Name, v.Arguments)
 					app.program.Send(ToolStartMsg{
 						Name:      v.Name,
 						Arguments: v.Arguments,
@@ -247,12 +206,14 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 				case "end":
 					logger.Info("UI-TOOL", fmt.Sprintf("Completed: %s", v.Name))
 					logger.Debug("UI-TOOL", fmt.Sprintf("Result: %s", truncateForLog(v.Result)))
+					recordToolEnd(v.Name, v.Result, false)
 					app.program.Send(ToolEndMsg{
 						Name:   v.Name,
 						Result: v.Result,
 					})
 				case "error":
 					logger.Error("UI-TOOL", fmt.Sprintf("Tool %s error: %s", v.Name, v.Error))
+					recordToolEnd(v.Name, "Error: "+v.Error, true)
 					app.program.Send(ErrorMsg(fmt.Sprintf("Tool %s error: %s", v.Name, v.Error)))
 				}
 			} else {
@@ -268,6 +229,7 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 			if !isInternal {
 				logger.Info("UI-TOOL", fmt.Sprintf("Starting (legacy): %s", v.Name))
 				logger.Debug("UI-TOOL", fmt.Sprintf("Arguments: %s", v.Arguments))
+				recordToolStart(v.Name, v.Arguments)
 				app.program.Send(ToolStartMsg{
 					Name:      v.Name,
 					Arguments: v.Arguments,
@@ -283,6 +245,7 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 			if !isInternal {
 				logger.Info("UI-TOOL", fmt.Sprintf("Completed (legacy): %s", v.Name))
 				logger.Debug("UI-TOOL", fmt.Sprintf("Result: %s", truncateForLog(v.Result)))
+				recordToolEnd(v.Name, v.Result, false)
 				app.program.Send(ToolEndMsg{
 					Name:   v.Name,
 					Result: v.Result,
@@ -298,16 +261,19 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 	}
 
 	// Create streaming content callback function
+	var answer strings.Builder
 	chunkCallback := func(chunk *agent.StreamChunk) {
 		switch chunk.Type {
 		case "content":
 			if chunk.Content != "" {
+				answer.WriteString(chunk.Content)
 				app.program.Send(StreamChunkMsg(chunk.Content))
 			} else {
 				app.program.Send(StreamEndMsg{})
 			}
 		case "reasoning":
 			if chunk.Content != "" {
+				thought.WriteString(chunk.Content)
 				app.program.Send(ReasoningChunkMsg(chunk.Content))
 			}
 		case "error":
@@ -315,367 +281,19 @@ func (app *AgentApp) processConversation(messages []*schema.Message) {
 		}
 	}
 
-	// Use Agent's ChatStream method for streaming conversation
+	// Use Agent's ChatStream method for streaming conversation. The context
+	// carries the host so ask_user/todolist can reach the TUI.
 	logger.Info("UI-AGENT", "Calling agent ChatStream")
-	err := app.agent.ChatStream(app.ctx, prompt, chunkCallback, toolCallback)
+	ctx := tools.WithHost(app.ctx, app)
+	err := app.agent.ChatStream(ctx, history, prompt, chunkCallback, toolCallback)
+	flushThought()
 	if err != nil {
 		logger.Error("UI-AGENT", fmt.Sprintf("AI response error: %v", err))
 		app.program.Send(ErrorMsg(fmt.Sprintf("AI response error: %v", err)))
 	} else {
 		logger.Info("UI-AGENT", "ChatStream completed successfully")
+		app.recordTurn(session.RoleAssistant, answer.String())
 	}
-}
-
-// sendMessageWithAgent sends messages using ReactAgent, supporting tool call callbacks (for ChatApp use)
-func (app *ChatApp) sendMessageWithAgent(message string) error {
-	// Create temporary Agent configuration
-	if app.reactAgent == nil {
-		agentConfig := config.Agent{
-			System: app.effectiveSystem(),
-			Model:  app.modelName,
-			Tools:  app.effectiveTools(),
-		}
-
-		// Create ReactAgent instance
-		reactAgent := agent.NewReactAgent("temp_chat_agent", &agentConfig)
-		if err := reactAgent.Init(); err != nil {
-			app.program.Send(ErrorMsg(fmt.Sprintf("Failed to initialize Agent: %v", err)))
-			return err
-		}
-		app.reactAgent = reactAgent
-	}
-
-	// Run Agent in background and get response
-	go func() {
-		ctx := context.Background()
-
-		// Create tool call callback function
-		callback := func(data interface{}) {
-			switch v := data.(type) {
-			case string:
-				// Streaming content
-				app.program.Send(StreamChunkMsg(v))
-			case map[string]interface{}:
-				// Tool call information
-				if toolType, ok := v["type"].(string); ok {
-					switch toolType {
-					case "reasoning":
-						if content, ok := v["content"].(string); ok && content != "" {
-							app.program.Send(ReasoningChunkMsg(content))
-						}
-					case "tool_start":
-						if toolName, ok := v["tool_name"].(string); ok {
-							var inputStr string
-							if input := v["input"]; input != nil {
-								if inputBytes, err := json.Marshal(input); err == nil {
-									inputStr = string(inputBytes)
-								}
-							}
-							app.program.Send(ToolStartMsg{
-								Name:      toolName,
-								Arguments: inputStr,
-							})
-						}
-					case "tool_end":
-						if toolName, ok := v["tool_name"].(string); ok {
-							var outputStr string
-							if output := v["output"]; output != nil {
-								if outputBytes, err := json.Marshal(output); err == nil {
-									outputStr = string(outputBytes)
-								}
-							}
-							app.program.Send(ToolEndMsg{
-								Name:   toolName,
-								Result: outputStr,
-							})
-						}
-					case "tool_error":
-						if toolName, ok := v["tool_name"].(string); ok {
-							if errorMsg, ok := v["error"].(string); ok {
-								app.program.Send(ErrorMsg(fmt.Sprintf("Tool %s execution error: %s", toolName, errorMsg)))
-							}
-						}
-					}
-				}
-			}
-		}
-
-		// Use Agent's ChatWithCallback method to generate response
-		response, err := app.reactAgent.ChatWithCallback(ctx, message, callback)
-		if err != nil {
-			app.program.Send(ErrorMsg(fmt.Sprintf("AI response error: %v", err)))
-			return
-		}
-
-		// Send complete response
-		if response != "" {
-			app.program.Send(ResponseMsg(response))
-		}
-	}()
-
-	return nil
-}
-
-// sendMessageWithModel sends messages using the original model direct call method (for ChatApp use)
-func (app *ChatApp) sendMessageWithModel(message string) error {
-	// Create model instance (if not created yet)
-	if app.chatModel == nil {
-		ctx := context.Background()
-		chatModel, err := app.modelFactory.CreateChatModel(ctx, app.modelName)
-		if err != nil {
-			// Send error message to UI
-			app.program.Send(ErrorMsg(fmt.Sprintf("Failed to create Model: %v", err)))
-			return err
-		}
-
-		// If tools are specified, use WithTools method to load tools
-		if len(app.tools) > 0 {
-			toolInstances, err := app.createTools()
-			if err != nil {
-				app.program.Send(ErrorMsg(fmt.Sprintf("Failed to create tools: %v", err)))
-				return err
-			}
-
-			// Convert InvokableTool to ToolInfo
-			var toolInfos []*schema.ToolInfo
-			for _, tool := range toolInstances {
-				info, err := tool.Info(context.Background())
-				if err != nil {
-					app.program.Send(ErrorMsg(fmt.Sprintf("Failed to get tool information: %v", err)))
-					return err
-				}
-				toolInfos = append(toolInfos, info)
-			}
-
-			chatModel, err = chatModel.WithTools(toolInfos)
-			if err != nil {
-				app.program.Send(ErrorMsg(fmt.Sprintf("Failed to set up tools: %v", err)))
-				return err
-			}
-		}
-
-		app.chatModel = chatModel
-	}
-
-	// Run model in background and get streaming response
-	go func() {
-		ctx := context.Background()
-
-		// Create message list, including optional system prompt
-		var messages []*schema.Message
-		if system := app.effectiveSystem(); system != "" {
-			messages = append(messages, schema.SystemMessage(system))
-		}
-		messages = append(messages, schema.UserMessage(message))
-
-		// Start conversation loop, handling tool calls
-		app.processConversation(ctx, messages)
-	}()
-
-	return nil
-}
-
-// processConversation handles conversation loop, including tool calls (for ChatApp use)
-func (app *ChatApp) processConversation(ctx context.Context, messages []*schema.Message) {
-	maxIterations := 10 // Prevent infinite loops
-	iteration := 0
-	tf := agent.NewThinkFilter()
-
-	for iteration < maxIterations {
-		iteration++
-
-		// Call Model's Stream method to get streaming response
-		streamReader, err := app.chatModel.Stream(ctx, messages)
-		if err != nil {
-			app.program.Send(ErrorMsg(fmt.Sprintf("AI response error: %v", err)))
-			return
-		}
-
-		// Handle streaming response
-		var fullContent string
-		var assistantMessage *schema.Message
-		var allToolCalls []schema.ToolCall
-
-		for {
-			chunk, err := streamReader.Recv()
-			if err != nil {
-				// Stream ended or error occurred
-				if err.Error() != "EOF" && err.Error() != "io: read/write on closed pipe" {
-					app.program.Send(ErrorMsg(fmt.Sprintf("Streaming response error: %v", err)))
-					streamReader.Close()
-					return
-				}
-				break
-			}
-
-			// Split reasoning from visible content before sending updates
-			visible, thought := tf.Feed(chunk.Content)
-			if thought != "" {
-				app.program.Send(ReasoningChunkMsg(thought))
-			}
-			if visible != "" {
-				fullContent += visible
-				app.program.Send(StreamChunkMsg(visible))
-			}
-
-			// Check if current chunk contains tool calls
-			if len(chunk.ToolCalls) > 0 {
-				// Accumulate all tool calls
-				allToolCalls = append(allToolCalls, chunk.ToolCalls...)
-			}
-
-			// Save complete assistant message (including possible tool calls)
-			assistantMessage = chunk
-		}
-		streamReader.Close()
-
-		// Drain any content buffered by the reasoning filter
-		if visible, thought := tf.Flush(); thought != "" || visible != "" {
-			if thought != "" {
-				app.program.Send(ReasoningChunkMsg(thought))
-			}
-			if visible != "" {
-				fullContent += visible
-				app.program.Send(StreamChunkMsg(visible))
-			}
-		}
-
-		// If tool calls were accumulated, merge them into the final assistant message
-		if len(allToolCalls) > 0 && assistantMessage != nil {
-			assistantMessage.ToolCalls = allToolCalls
-		}
-
-		// Check if there are tool calls
-		if assistantMessage != nil && len(assistantMessage.ToolCalls) > 0 {
-			// Send complete response to UI (if there is content)
-			if fullContent != "" {
-				app.program.Send(ResponseMsg(fullContent))
-			}
-
-			// Add assistant message to message history
-			messages = append(messages, assistantMessage)
-
-			// Execute tool calls
-			toolResults, err := app.executeToolCalls(ctx, assistantMessage.ToolCalls)
-			if err != nil {
-				app.program.Send(ErrorMsg(fmt.Sprintf("Tool execution error: %v", err)))
-				return
-			}
-
-			// Add tool results to message history
-			messages = append(messages, toolResults...)
-
-			// Continue to next round of conversation
-			continue
-		} else {
-			// No tool calls, send final response and end
-			if fullContent != "" {
-				app.program.Send(ResponseMsg(fullContent))
-			}
-			break
-		}
-	}
-
-	if iteration >= maxIterations {
-		app.program.Send(ErrorMsg("Maximum iterations reached, stopping conversation"))
-	}
-}
-
-// executeToolCalls executes tool calls (for ChatApp use)
-func (app *ChatApp) executeToolCalls(ctx context.Context, toolCalls []schema.ToolCall) ([]*schema.Message, error) {
-	// Create tool instance mapping
-	toolInstances, err := app.createTools()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create tool instances: %v", err)
-	}
-
-	// Create tool name to instance mapping
-	toolMap := make(map[string]tool.InvokableTool)
-	for _, toolInstance := range toolInstances {
-		info, err := toolInstance.Info(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get tool information: %v", err)
-		}
-		toolMap[info.Name] = toolInstance
-	}
-
-	var toolMessages []*schema.Message
-
-	// Execute each tool call
-	for _, toolCall := range toolCalls {
-		toolName := toolCall.Function.Name
-		arguments := toolCall.Function.Arguments
-		if toolName == "" {
-			continue
-		}
-		// Find tool instance
-		toolInstance, exists := toolMap[toolName]
-		if !exists {
-			// Tool does not exist, return error message
-			errorMsg := fmt.Sprintf("Tool '%s' does not exist", toolName)
-			toolMessage := schema.ToolMessage(errorMsg, toolCall.ID, schema.WithToolName(toolName))
-			toolMessages = append(toolMessages, toolMessage)
-
-			// Display tool not found error
-			app.program.Send(StreamChunkMsg(fmt.Sprintf("❌ Tool '%s' does not exist\n", toolName)))
-			continue
-		}
-
-		// Display tool call information
-		app.program.Send(StreamChunkMsg(fmt.Sprintf("\n🔧 Calling tool: %s\nArguments: %s\n", toolName, arguments)))
-
-		// Execute tool
-		result, err := toolInstance.InvokableRun(ctx, arguments)
-		if err != nil {
-			// Tool execution failed, return error message
-			errorMsg := fmt.Sprintf("Tool execution failed: %v", err)
-			toolMessage := schema.ToolMessage(errorMsg, toolCall.ID, schema.WithToolName(toolName))
-			toolMessages = append(toolMessages, toolMessage)
-
-			// Display tool execution error
-			app.program.Send(StreamChunkMsg(fmt.Sprintf("❌ Tool execution failed: %v\n", err)))
-		} else {
-			// Tool execution succeeded, return result
-			toolMessage := schema.ToolMessage(result, toolCall.ID, schema.WithToolName(toolName))
-			toolMessages = append(toolMessages, toolMessage)
-
-			// Display tool execution result (limit length to avoid UI being too verbose)
-			displayResult := result
-			if len(result) > 500 {
-				displayResult = result[:500] + "...(result truncated)"
-			}
-			app.program.Send(StreamChunkMsg(fmt.Sprintf("✅ Tool execution result: %s\n", displayResult)))
-		}
-	}
-
-	return toolMessages, nil
-}
-
-// createTools creates tool instances (for ChatApp use)
-func (app *ChatApp) createTools() ([]tool.InvokableTool, error) {
-	cfg := config.GetConfig()
-	if cfg == nil {
-		return nil, fmt.Errorf("global configuration not initialized")
-	}
-
-	var toolInstances []tool.InvokableTool
-	for _, toolName := range app.tools {
-		// Get tool configuration
-		toolCfg, ok := cfg.Tools[toolName]
-		if !ok {
-			return nil, fmt.Errorf("tool configuration does not exist: %s", toolName)
-		}
-
-		// Create tool instance
-		toolInstance, err := tools.CreateTool(toolName, toolCfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create tool %s: %v", toolName, err)
-		}
-
-		toolInstances = append(toolInstances, toolInstance)
-	}
-
-	return toolInstances, nil
 }
 
 // isInternalComponent determines if it is an internal component that should not be displayed to users
@@ -705,13 +323,6 @@ func truncateForLog(text string) string {
 
 // Stop stops the Agent application
 func (app *AgentApp) Stop() {
-	if app.program != nil {
-		app.program.Quit()
-	}
-}
-
-// Stop stops the Chat application (merged from chat functionality)
-func (app *ChatApp) Stop() {
 	if app.program != nil {
 		app.program.Quit()
 	}

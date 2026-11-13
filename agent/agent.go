@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"strings"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 // StreamChunk represents a data chunk for streaming output
@@ -12,16 +14,20 @@ type StreamChunk struct {
 	Tool    string // Tool name (only used for tool-related messages)
 }
 
-// Agent defines the agent interface used in the CLI
+// Agent defines the agent interface used in the CLI.
+//
+// The conversation methods take the prior turns (history) explicitly: the
+// underlying ReAct flow is stateless, so multi-turn context is passed in by
+// the caller on every turn.
 type Agent interface {
 	// Run runs the agent
 	Run(prompt string) error
 	// Chat performs conversation, returns response content
-	Chat(ctx context.Context, prompt string) (string, error)
+	Chat(ctx context.Context, history []*schema.Message, prompt string) (string, error)
 	// ChatWithCallback performs conversation, supporting tool call callbacks
-	ChatWithCallback(ctx context.Context, prompt string, callback func(interface{})) (string, error)
+	ChatWithCallback(ctx context.Context, history []*schema.Message, prompt string, callback func(interface{})) (string, error)
 	// ChatStream performs streaming conversation, handles streaming output through chunk callback
-	ChatStream(ctx context.Context, prompt string, chunkCallback func(*StreamChunk), toolCallback func(interface{})) error
+	ChatStream(ctx context.Context, history []*schema.Message, prompt string, chunkCallback func(*StreamChunk), toolCallback func(interface{})) error
 }
 
 // Some OpenAI-compatible gateways (e.g. MiniMax via a proxy) embed the

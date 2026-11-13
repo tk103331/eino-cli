@@ -24,12 +24,20 @@ func CreateTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
 		return NewCommandLineTool(name, cfg)
 	case "duckduckgo":
 		return NewDuckDuckGoTool(name, cfg)
+	case "filesystem":
+		return NewFileSystemTool(name, cfg)
 	case "googlesearch":
 		return NewGoogleSearchTool(name, cfg)
 	case "httprequest":
 		return NewHTTPRequestTool(name, cfg)
 	case "sequentialthinking":
 		return NewSequentialThinkingTool(name, cfg)
+	case SubagentToolType:
+		return NewSubagentTool(name, cfg)
+	case AskUserToolType:
+		return NewAskUserTool(name, cfg)
+	case TodoToolType, "todo": // "todo" is the pre-rename type, still accepted
+		return NewTodoTool(name, cfg)
 	case "wikipedia":
 		return NewWikipediaTool(name, cfg)
 	default:

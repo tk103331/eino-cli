@@ -281,8 +281,13 @@ func TestViewFillsTerminalHeight(t *testing.T) {
 			t.Fatalf("height %d: view has %d lines", h, len(lines))
 		}
 		last := strings.TrimRight(lines[len(lines)-1], " ")
-		if !strings.HasPrefix(last, "╰") {
-			t.Fatalf("height %d: last line should be the input box bottom border, got %q", h, last)
+		if !strings.HasPrefix(last, "↑↓ scroll") {
+			t.Fatalf("height %d: last line should be the help bar, got %q", h, last)
+		}
+		// The input box sits directly above the help bar.
+		prev := strings.TrimRight(lines[len(lines)-2], " ")
+		if !strings.HasPrefix(prev, "╰") {
+			t.Fatalf("height %d: input box bottom border should be above the help bar, got %q", h, prev)
 		}
 	}
 
@@ -298,9 +303,13 @@ func TestViewFillsTerminalHeight(t *testing.T) {
 	if got := len(strings.Split(out, "\n")); got != 30 {
 		t.Fatalf("palette layout height = %d, want 30", got)
 	}
-	last := strings.TrimRight(strings.Split(out, "\n")[29], " ")
-	if !strings.HasPrefix(last, "╰") {
-		t.Fatalf("input box should stay at the bottom with palette visible: %q", last)
+	lines := strings.Split(out, "\n")
+	last := strings.TrimRight(lines[29], " ")
+	if !strings.HasPrefix(last, "↑↓ scroll") {
+		t.Fatalf("help bar should stay at the bottom with palette visible: %q", last)
+	}
+	if prev := strings.TrimRight(lines[28], " "); !strings.HasPrefix(prev, "╰") {
+		t.Fatalf("input box should stay above the help bar with palette visible: %q", prev)
 	}
 }
 
@@ -358,5 +367,103 @@ func TestMouseToggleShortcut(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "鼠标捕获已关闭") {
 		t.Fatalf("disable hint missing:\n%s", m.View())
+	}
+}
+
+func TestMouseClickTogglesToolBlock(t *testing.T) {
+	m := NewViewModel(func(string) error { return nil })
+	m = drive(m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.SetTranscript([]Message{
+		{Type: UserMessage, Content: "question"},
+		{Type: ToolStartMessage, Name: "search", Arguments: `{"q":"x"}`, ToolStatus: ToolSuccess, Result: "the result"},
+	})
+	m.View()
+
+	lineY := func(needle string) int {
+		for i, line := range m.renderedLines {
+			if strings.Contains(line, needle) {
+				return i - m.viewStart + 2 // header + rule
+			}
+		}
+		t.Fatalf("rendered line %q not found", needle)
+		return -1
+	}
+
+	// Clicking the folded tool line expands it and shows the result.
+	m = drive(m, tea.MouseMsg{X: 5, Y: lineY("search"), Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if !m.expanded[1] {
+		t.Fatal("left click should expand the tool block")
+	}
+	if !strings.Contains(m.View(), "the result") {
+		t.Fatalf("expanded tool result missing:\n%s", m.View())
+	}
+
+	// Clicking again folds it.
+	row := lineY("search")
+	m = drive(m, tea.MouseMsg{X: 5, Y: row, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if m.expanded[1] {
+		t.Fatal("second click should fold the tool block")
+	}
+
+	// Clicking a non-foldable line (user message) is a no-op.
+	m = drive(m, tea.MouseMsg{X: 5, Y: lineY("question"), Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if m.expanded[0] {
+		t.Fatal("user message should not be foldable")
+	}
+
+	// Clicks on the header/help chrome are ignored.
+	m = drive(m, tea.MouseMsg{X: 5, Y: 0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if m.expanded[0] || m.expanded[1] {
+		t.Fatalf("chrome click should not toggle anything: %v", m.expanded)
+	}
+}
+
+func TestErrorMessageFoldsByDefault(t *testing.T) {
+	m := NewViewModel(func(string) error { return nil })
+	m = drive(m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = drive(m, ErrorMsg("error: connect failed\nnode path: [chat]"))
+
+	out := m.View()
+	if !strings.Contains(out, "connect failed") {
+		t.Fatalf("folded error should show its first line:\n%s", out)
+	}
+	if strings.Contains(out, "node path") {
+		t.Fatalf("error details should be folded by default:\n%s", out)
+	}
+
+	// Tab selects the error block; Ctrl+O expands it in place.
+	m = drive(m, tea.KeyMsg{Type: tea.KeyTab}, tea.KeyMsg{Type: tea.KeyCtrlO})
+	if out := m.View(); !strings.Contains(out, "node path") {
+		t.Fatalf("expanded error should show every line:\n%s", out)
+	}
+}
+
+func TestSelectedFoldableRowIsHighlighted(t *testing.T) {
+	m := NewViewModel(func(string) error { return nil })
+	m = drive(m, tea.WindowSizeMsg{Width: 80, Height: 30})
+	m = drive(m,
+		ToolStartMsg{Name: "filesystem", Arguments: `{"operation":"list","path":"."}`},
+		ToolEndMsg{Name: "filesystem", Result: "ok"},
+	)
+
+	// Tab selects the newest foldable row; it must be highlighted across the
+	// full terminal width, not just on the fold marker.
+	m = drive(m, tea.KeyMsg{Type: tea.KeyTab})
+	if m.selected < 0 {
+		t.Fatal("tab did not select a foldable row")
+	}
+
+	found := false
+	for _, line := range strings.Split(m.View(), "\n") {
+		if !strings.Contains(line, "filesystem") {
+			continue
+		}
+		found = true
+		if w := lipgloss.Width(line); w != 80 {
+			t.Fatalf("selected row width = %d, want the full 80 columns", w)
+		}
+	}
+	if !found {
+		t.Fatalf("tool row missing:\n%s", m.View())
 	}
 }

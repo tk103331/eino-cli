@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/tk103331/eino-cli/config"
+	"github.com/tk103331/eino-cli/tools/approval"
 )
 
 // HTTPConfig HTTP tool configuration structure
@@ -120,6 +121,23 @@ func NewHTTPTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
 // Info gets tool information
 func (h *HTTPTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	return h.info, nil
+}
+
+// ApprovalRequest flags methods that can change remote state. GET and HEAD are
+// read-only and run without asking.
+func (h *HTTPTool) ApprovalRequest(arguments string) (approval.Request, bool) {
+	method := strings.ToUpper(strings.TrimSpace(h.httpConfig.Method))
+	if method == "" {
+		method = "GET"
+	}
+	if method == "GET" || method == "HEAD" || method == "OPTIONS" {
+		return approval.Request{}, false
+	}
+	return approval.Request{
+		Tool:    h.info.Name,
+		Summary: fmt.Sprintf("发送 %s 请求：%s", method, h.httpConfig.URL),
+		Detail:  arguments,
+	}, true
 }
 
 // InvokableRun implements InvokableTool interface

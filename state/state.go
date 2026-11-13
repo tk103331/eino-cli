@@ -2,13 +2,14 @@
 package state
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// dir returns the eino-cli state directory (~/.eino-cli).
-func dir() string {
+// Dir returns the eino-cli state directory (~/.eino-cli).
+func Dir() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
@@ -18,7 +19,7 @@ func dir() string {
 
 // lastAgentPath returns the file storing the last used agent name.
 func lastAgentPath() string {
-	d := dir()
+	d := Dir()
 	if d == "" {
 		return ""
 	}
@@ -61,4 +62,74 @@ func ClearLastAgent() error {
 		return nil
 	}
 	return err
+}
+
+// rememberedModelsPath returns the file storing per-agent model choices made
+// at runtime (e.g. with the /model command).
+func rememberedModelsPath() string {
+	d := Dir()
+	if d == "" {
+		return ""
+	}
+	return filepath.Join(d, "agent_models.json")
+}
+
+// RememberedModel returns the model remembered for an agent, or "".
+func RememberedModel(agentName string) string {
+	models := rememberedModels()
+	return models[strings.TrimSpace(agentName)]
+}
+
+// SetRememberedModel records the model chosen for an agent. An empty model
+// removes the entry, so the agent falls back to its configured model.
+func SetRememberedModel(agentName, model string) error {
+	agentName = strings.TrimSpace(agentName)
+	if agentName == "" {
+		return nil
+	}
+	model = strings.TrimSpace(model)
+
+	models := rememberedModels()
+	if model == "" {
+		if _, ok := models[agentName]; !ok {
+			return nil
+		}
+		delete(models, agentName)
+	} else {
+		if models[agentName] == model {
+			return nil
+		}
+		models[agentName] = model
+	}
+
+	path := rememberedModelsPath()
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(models, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
+// rememberedModels loads the agent -> model map. A missing or unreadable file
+// yields an empty map: remembering a model is best-effort.
+func rememberedModels() map[string]string {
+	out := make(map[string]string)
+	path := rememberedModelsPath()
+	if path == "" {
+		return out
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return out
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return make(map[string]string)
+	}
+	return out
 }

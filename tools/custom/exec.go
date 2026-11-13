@@ -14,6 +14,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/tk103331/eino-cli/config"
+	"github.com/tk103331/eino-cli/tools/approval"
 )
 
 // ExecConfig execution tool configuration structure
@@ -114,6 +115,15 @@ func NewExecTool(name string, cfg config.Tool) (tool.InvokableTool, error) {
 // Info gets tool information
 func (e *ExecTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	return e.info, nil
+}
+
+// ApprovalRequest flags every call: the configured command can do anything.
+func (e *ExecTool) ApprovalRequest(arguments string) (approval.Request, bool) {
+	return approval.Request{
+		Tool:    e.info.Name,
+		Summary: "运行自定义命令：" + e.execConfig.Cmd,
+		Detail:  arguments,
+	}, true
 }
 
 // InvokableRun implements InvokableTool interface

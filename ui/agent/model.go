@@ -88,12 +88,24 @@ type ViewModel struct {
 	// Mouse capture toggle (off by default so text selection works).
 	onToggleMouse func() bool
 
+	// onClear is notified when the transcript is cleared (/clear or Ctrl+L)
+	// so the host can start a fresh persistence session.
+	onClear func()
+
+	// Task panel and pending ask_user question. A finished list folds away on
+	// the next user turn; new pending work expands it again.
+	todos          []TodoItem
+	todosCollapsed bool
+	question       *questionState
+
 	// Efficient line-based rendering cache: rebuilt only when content
 	// changes (dirty) and at most once per renderInterval while streaming.
 	dirty          bool
 	lastRender     time.Time
 	renderedLines  []string
-	scrollOffset   int // Lines from the newest end (0 = pinned to bottom)
+	lineOwners     []int // message index owning each rendered line (-1 = none)
+	viewStart      int   // absolute index of the first visible line (last View)
+	scrollOffset   int   // Lines from the newest end (0 = pinned to bottom)
 	spinnerFrame   int
 	spinnerStarted bool
 }
@@ -111,6 +123,50 @@ type ToolStartMsg struct {
 type ToolEndMsg struct {
 	Name   string
 	Result string
+}
+
+// Task statuses shown in the TUI task panel.
+const (
+	TodoPending    = "pending"
+	TodoInProgress = "in_progress"
+	TodoCompleted  = "completed"
+)
+
+// TodoItem is one entry of the displayed task list.
+type TodoItem struct {
+	Content string
+	Status  string
+}
+
+// TodoUpdateMsg replaces the task panel contents.
+type TodoUpdateMsg struct {
+	Items []TodoItem
+}
+
+// AskQuestionMsg asks the user a question from a running tool. The answer is
+// sent back on Reply ("" means the user cancelled). Approval prompts reuse the
+// question panel but only accept one of the offered options.
+type AskQuestionMsg struct {
+	Question string
+	Options  []string
+	Reply    chan string
+	Approval bool   // tool-approval prompt: options only, no free text
+	Detail   string // extra context shown dim below the question
+}
+
+// CancelQuestionMsg dismisses a pending question when the turn was cancelled
+// before the user answered.
+type CancelQuestionMsg struct{}
+
+// questionState is the pending ask_user question rendered above the input.
+type questionState struct {
+	question string
+	options  []string
+	reply    chan string
+	sel      int
+	typing   bool   // user switched to a free-text answer
+	approval bool   // tool-approval prompt (no free-text answer)
+	detail   string // extra context (e.g. raw tool arguments)
 }
 
 // spinnerTickMsg drives the waiting spinner animation
@@ -159,12 +215,237 @@ func (m *ViewModel) markDirty() {
 	m.lastRender = time.Time{}
 }
 
+// SetOnClear registers a callback invoked whenever the transcript is cleared.
+func (m *ViewModel) SetOnClear(fn func()) {
+	m.onClear = fn
+}
+
+// SetTranscript replaces the conversation with the given messages (used when
+// resuming a saved session).
+func (m *ViewModel) SetTranscript(msgs []Message) {
+	m.clearChat()
+	for _, msg := range msgs {
+		msg.mdCache = ""
+		m.messages = append(m.messages, msg)
+	}
+	m.markDirty()
+}
+
+// SetTodos replaces the task panel contents (used when resuming a session).
+func (m *ViewModel) SetTodos(items []TodoItem) {
+	m.todos = append([]TodoItem{}, items...)
+	m.todosCollapsed = false
+	m.markDirty()
+}
+
+// updateTodos replaces the panel from a tool update. A folded finished list
+// stays folded; new pending work expands it again.
+func (m *ViewModel) updateTodos(items []TodoItem) {
+	m.todos = append([]TodoItem{}, items...)
+	m.todosCollapsed = m.todosCollapsed && todosAllDone(m.todos)
+	m.markDirty()
+}
+
+// collapseFinishedTodos folds a completed task list when the user starts the
+// next turn: the finished list is no longer actionable and takes up space.
+func (m *ViewModel) collapseFinishedTodos() {
+	if m.todosCollapsed || !todosAllDone(m.todos) {
+		return
+	}
+	m.todosCollapsed = true
+	m.markDirty()
+}
+
+// todosAllDone reports whether the list is non-empty and fully completed.
+func todosAllDone(items []TodoItem) bool {
+	if len(items) == 0 {
+		return false
+	}
+	for _, item := range items {
+		if item.Status != TodoCompleted {
+			return false
+		}
+	}
+	return true
+}
+
+// toggleTodosAt folds or expands the finished task panel at a screen row.
+// Returns true when the click was on the panel. A running list is never
+// folded: its checkmarks stay visible until the turn completes.
+func (m *ViewModel) toggleTodosAt(screenY int) bool {
+	if !todosAllDone(m.todos) {
+		return false
+	}
+	top := 2 + m.viewportHeight() // header + rule + transcript
+	if screenY < top || screenY >= top+len(m.todoPanelLines()) {
+		return false
+	}
+	m.todosCollapsed = !m.todosCollapsed
+	m.markDirty()
+	return true
+}
+
+// finishQuestion sends the answer to the waiting tool and closes the prompt.
+func (m *ViewModel) finishQuestion(answer string) {
+	q := m.question
+	if q == nil {
+		return
+	}
+	m.question = nil
+	m.input = ""
+	m.cursor = 0
+	answer = strings.TrimSpace(answer)
+	if q.reply != nil {
+		select {
+		case q.reply <- answer:
+		default: // the tool already gave up (e.g. the turn was cancelled)
+		}
+	}
+
+	prefix := "❓ "
+	if q.approval {
+		prefix = "⚠ "
+	}
+	text := prefix + q.question
+	switch {
+	case answer == "":
+		text += "\n（未回答）"
+	case q.approval:
+		text += "\n→ " + answer
+	default:
+		text += "\n答：" + answer
+	}
+	m.appendCommandMessage(text, false)
+}
+
+// handleQuestionKey routes keys to the pending ask_user question. It returns
+// false when the key should keep its normal meaning (e.g. arrows with no
+// options to choose from).
+func (m *ViewModel) handleQuestionKey(msg tea.KeyMsg) bool {
+	q := m.question
+	if q == nil {
+		return false
+	}
+	// Approval prompts only accept the offered options; other keys are
+	// swallowed so the shared input box cannot preempt the decision.
+	if q.approval {
+		if len(q.options) == 0 {
+			m.finishQuestion("")
+			return true
+		}
+		switch msg.Type {
+		case tea.KeyEsc:
+			m.finishQuestion("")
+		case tea.KeyEnter:
+			m.finishQuestion(q.options[q.sel])
+		case tea.KeyUp:
+			q.sel = (q.sel - 1 + len(q.options)) % len(q.options)
+			m.markDirty()
+		case tea.KeyDown:
+			q.sel = (q.sel + 1) % len(q.options)
+			m.markDirty()
+		}
+		return true
+	}
+
+	// syncTyping returns to option selection when the free-text input is empty.
+	syncTyping := func() { q.typing = len([]rune(m.input)) > 0 }
+
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.finishQuestion("")
+		return true
+	case tea.KeyEnter:
+		if q.typing || len(q.options) == 0 {
+			m.finishQuestion(m.input)
+		} else {
+			m.finishQuestion(q.options[q.sel])
+		}
+		return true
+	case tea.KeyUp:
+		if len(q.options) > 0 && !q.typing {
+			q.sel = (q.sel - 1 + len(q.options)) % len(q.options)
+			m.markDirty()
+			return true
+		}
+		return false
+	case tea.KeyDown:
+		if len(q.options) > 0 && !q.typing {
+			q.sel = (q.sel + 1) % len(q.options)
+			m.markDirty()
+			return true
+		}
+		return false
+	case tea.KeySpace:
+		m.insertRune(' ')
+		syncTyping()
+		return true
+	case tea.KeyRunes:
+		for _, r := range msg.Runes {
+			if r == '\n' || r == '\r' {
+				r = ' '
+			}
+			m.insertRune(r)
+		}
+		syncTyping()
+		return true
+	case tea.KeyBackspace:
+		m.backspace()
+		syncTyping()
+		return true
+	case tea.KeyDelete:
+		m.deleteAtCursor()
+		syncTyping()
+		return true
+	case tea.KeyLeft:
+		if m.cursor > 0 {
+			m.cursor--
+		}
+		return true
+	case tea.KeyRight:
+		if m.cursor < len([]rune(m.input)) {
+			m.cursor++
+		}
+		return true
+	case tea.KeyCtrlA:
+		m.cursor = 0
+		return true
+	case tea.KeyCtrlE:
+		m.cursor = len([]rune(m.input))
+		return true
+	case tea.KeyCtrlU:
+		m.deleteBeforeCursor()
+		syncTyping()
+		return true
+	case tea.KeyCtrlK:
+		m.deleteAfterCursor()
+		syncTyping()
+		return true
+	case tea.KeyCtrlW:
+		m.deleteWord()
+		syncTyping()
+		return true
+	}
+	return false
+}
+
+// clearConversation empties the transcript and notifies the host.
+func (m *ViewModel) clearConversation() {
+	m.clearChat()
+	if m.onClear != nil {
+		m.onClear()
+	}
+}
+
 // clearChat empties the conversation, keeping the input intact.
 func (m *ViewModel) clearChat() {
 	m.messages = nil
 	m.streamingContent = ""
 	m.reasoningContent = ""
 	m.errorMsg = ""
+	m.todos = nil
+	m.todosCollapsed = false
+	m.question = nil
 	m.scrollOffset = 0
 	m.expanded = make(map[int]bool)
 	m.selected = -1
@@ -308,6 +589,14 @@ func (m *ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseButtonWheelDown:
 			m.scrollOffset -= 3
 			return m, m.clampScroll()
+		case tea.MouseButtonLeft:
+			// A left click on a reasoning/tool line folds or expands it; the
+			// finished task panel can be folded and unfolded the same way.
+			if msg.Action == tea.MouseActionPress {
+				if m.toggleTodosAt(msg.Y) || m.toggleBlockAt(msg.Y) {
+					return m, m.clampScroll()
+				}
+			}
 		}
 		return m, nil
 
@@ -316,6 +605,43 @@ func (m *ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.confirmQuit = false
 			m.markDirty()
 		}
+		return m, nil
+
+	case AskQuestionMsg:
+		// One question at a time: a second tool asking concurrently is told
+		// to proceed without an answer instead of deadlocking.
+		if m.question != nil {
+			if msg.Reply != nil {
+				select {
+				case msg.Reply <- "":
+				default:
+				}
+			}
+			return m, nil
+		}
+		m.question = &questionState{
+			question: msg.Question,
+			options:  msg.Options,
+			reply:    msg.Reply,
+			approval: msg.Approval,
+			detail:   msg.Detail,
+		}
+		m.input = ""
+		m.cursor = 0
+		m.markDirty()
+		return m, nil
+
+	case CancelQuestionMsg:
+		if m.question != nil {
+			m.question = nil
+			m.input = ""
+			m.cursor = 0
+			m.markDirty()
+		}
+		return m, nil
+
+	case TodoUpdateMsg:
+		m.updateTodos(msg.Items)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -332,6 +658,12 @@ func (m *ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Any other key cancels the pending quit.
 			m.confirmQuit = false
 			m.markDirty()
+		}
+
+		// A pending ask_user question owns the keyboard: arrows pick an
+		// option, enter submits, esc cancels, typing switches to free text.
+		if m.question != nil && m.handleQuestionKey(msg) {
+			return m, nil
 		}
 
 		// Esc never quits: it only dismisses the command palette/input.
@@ -351,7 +683,7 @@ func (m *ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.KeyCtrlY {
 			if m.onToggleMouse != nil {
 				if m.onToggleMouse() {
-					m.appendCommandMessage("鼠标捕获已启用：滚轮可滚动对话；复制可在拖选时按住 Shift（多数终端），或再按 Ctrl+Y 关闭捕获", false)
+					m.appendCommandMessage("鼠标捕获已启用：滚轮可滚动对话，点击思考/工具/错误行可展开或折叠；复制可在拖选时按住 Shift（多数终端），或再按 Ctrl+Y 关闭捕获", false)
 				} else {
 					m.appendCommandMessage("鼠标捕获已关闭：可直接用鼠标选择并复制文本；滚轮由终端转发（Ctrl+Y 可强制启用鼠标滚动）", false)
 				}
@@ -424,7 +756,7 @@ func (m *ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case tea.KeyCtrlL:
-			m.clearChat()
+			m.clearConversation()
 			return m, nil
 
 		case tea.KeyLeft:
@@ -476,6 +808,8 @@ func (m *ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			// A finished task list folds away as the next turn begins.
+			m.collapseFinishedTodos()
 			m.messages = append(m.messages, Message{
 				Type:    UserMessage,
 				Content: m.input,
@@ -654,12 +988,13 @@ func (m *ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // ---- collapsible block helpers ----
 
-// collapsibleIndices lists message indices that can be folded (reasoning and
-// tool call blocks) in conversation order.
+// collapsibleIndices lists message indices that can be folded (reasoning,
+// tool call and error blocks) in conversation order.
 func (m *ViewModel) collapsibleIndices() []int {
 	var idx []int
 	for i, msg := range m.messages {
-		if msg.Type == ReasoningMessage || msg.Type == ToolStartMessage {
+		switch msg.Type {
+		case ReasoningMessage, ToolStartMessage, ErrorMessage:
 			idx = append(idx, i)
 		}
 	}
@@ -703,6 +1038,32 @@ func (m *ViewModel) toggleSelectedBlock() {
 	// folded always. Toggling flips the current state.
 	m.expanded[m.selected] = !m.expanded[m.selected]
 	m.markDirty()
+}
+
+// toggleBlockAt folds or expands the reasoning/tool block at a screen row.
+// Returns true when a foldable block was toggled.
+func (m *ViewModel) toggleBlockAt(screenY int) bool {
+	const messageTop = 2 // header + rule above the transcript
+	row := screenY - messageTop
+	if row < 0 || row >= m.viewportHeight() {
+		return false
+	}
+	abs := m.viewStart + row
+	if abs < 0 || abs >= len(m.lineOwners) {
+		return false
+	}
+	idx := m.lineOwners[abs]
+	if idx < 0 || idx >= len(m.messages) {
+		return false
+	}
+	switch m.messages[idx].Type {
+	case ReasoningMessage, ToolStartMessage, ErrorMessage:
+		m.expanded[idx] = !m.expanded[idx]
+		m.selected = idx
+		m.markDirty()
+		return true
+	}
+	return false
 }
 
 // ---- input editing helpers ----
@@ -791,8 +1152,9 @@ func (m *ViewModel) paletteView() []string {
 }
 
 func (m *ViewModel) viewportHeight() int {
-	// Fixed chrome: header(1) + rule(1) + help bar(1) + input box(3).
-	h := m.height - 6 - len(m.paletteView())
+	// Fixed chrome: header(1) + rule(1) + help bar(1) + input box(3), plus
+	// the task panel, question prompt and command palette when shown.
+	h := m.height - 6 - len(m.paletteView()) - len(m.todoPanelLines()) - len(m.questionPanelLines())
 	if h < 1 {
 		h = 1
 	}
@@ -856,39 +1218,49 @@ func (m *ViewModel) refreshCache() {
 func (m *ViewModel) updateRenderedLines() {
 	m.ensureRenderer()
 	m.renderedLines = m.renderedLines[:0]
+	m.lineOwners = m.lineOwners[:0]
+
+	// appendOwned tracks which message produced each line so mouse clicks can
+	// be mapped back to the block that was clicked (owner -1 = not clickable).
+	appendOwned := func(owner int, lines []string) {
+		m.renderedLines = append(m.renderedLines, lines...)
+		for range lines {
+			m.lineOwners = append(m.lineOwners, owner)
+		}
+	}
 
 	for i := range m.messages {
 		msg := &m.messages[i]
 		switch msg.Type {
 		case UserMessage:
-			m.renderedLines = append(m.renderedLines, m.renderUserMessage(msg.Content)...)
+			appendOwned(i, m.renderUserMessage(msg.Content))
 		case AssistantMessage:
-			m.renderedLines = append(m.renderedLines, m.renderAssistantMessage(msg)...)
+			appendOwned(i, m.renderAssistantMessage(msg))
 		case ReasoningMessage:
-			m.renderedLines = append(m.renderedLines, m.renderReasoningMessage(msg, i, false)...)
+			appendOwned(i, m.renderReasoningMessage(msg, i, false))
 		case ToolStartMessage:
-			m.renderedLines = append(m.renderedLines, m.renderToolMessage(msg, i)...)
+			appendOwned(i, m.renderToolMessage(msg, i))
 		case ErrorMessage:
-			m.renderedLines = append(m.renderedLines, m.renderErrorMessage(msg.Content)...)
+			appendOwned(i, m.renderErrorMessage(msg, i))
 		case InfoMessage:
-			m.renderedLines = append(m.renderedLines, m.renderInfoMessage(msg.Content)...)
+			appendOwned(i, m.renderInfoMessage(msg.Content))
 		}
 	}
 
 	// Streaming content: reasoning first (expanded while running), then the answer
 	if m.reasoningContent != "" {
 		live := &Message{Type: ReasoningMessage, Content: m.reasoningContent}
-		m.renderedLines = append(m.renderedLines, m.renderReasoningMessage(live, -1, true)...)
+		appendOwned(-1, m.renderReasoningMessage(live, -1, true))
 	}
 	if m.streamingContent != "" {
-		lines := m.renderAssistantContent(m.streamingContent, true)
-		m.renderedLines = append(m.renderedLines, lines...)
+		appendOwned(-1, m.renderAssistantContent(m.streamingContent, true))
 	} else if m.isWaiting && m.reasoningContent == "" {
 		// Spinner only shows while nothing streams yet — otherwise the
 		// "(typing…)" label already indicates progress.
 		spinner := m.warningStyle(true).Render(spinnerFrames[m.spinnerFrame])
-		m.renderedLines = append(m.renderedLines,
-			m.muted().Render("  "+spinner+" thinking..."), "")
+		appendOwned(-1, []string{
+			m.muted().Render("  " + spinner + " thinking..."), "",
+		})
 	}
 
 	// System error (avoid duplicating a message that is already shown)
@@ -901,24 +1273,31 @@ func (m *ViewModel) updateRenderedLines() {
 			}
 		}
 		if !dup {
-			m.renderedLines = append(m.renderedLines, m.renderErrorMessage("⚠️ "+m.errorMsg)...)
+			appendOwned(-1, m.renderErrorMessage(&Message{
+				Type:    ErrorMessage,
+				Content: "⚠️ " + m.errorMsg,
+			}, -1))
 		}
 	}
 
 	// Welcome screen when there is nothing to show
 	if len(m.renderedLines) == 0 {
-		m.renderedLines = append(m.renderedLines,
+		appendOwned(-1, []string{
 			"",
 			m.muted().Render("  Welcome to Eino CLI Agent — type a message to get started."),
 			"",
 			m.muted().Render("  Tools, models and agents are configured in config.yml"),
 			"",
-		)
+		})
 	}
 
 	// Trailing whitespace is pointless and widens the diff the renderer
-	// has to repaint between frames.
+	// has to repaint between frames. Rows that span the full width (the
+	// selected highlight bar) keep their padding.
 	for i := range m.renderedLines {
+		if lipgloss.Width(m.renderedLines[i]) >= m.width {
+			continue
+		}
 		m.renderedLines[i] = strings.TrimRight(m.renderedLines[i], " \t")
 	}
 }
@@ -978,21 +1357,27 @@ func (m *ViewModel) renderReasoningMessage(msg *Message, index int, streaming bo
 
 	expanded := m.expanded[index]
 	label := "◇ Thinking"
-	if m.selected == index {
-		headStyle = headStyle.Underline(true)
-	}
-	head := m.reasoningMarker(expanded, m.selected == index) + " " + headStyle.Render(label)
+	plain := foldGlyph(expanded) + " " + label
+	head := m.reasoningMarker(expanded, false) + " " + headStyle.Render(label)
 	if !expanded {
 		// Folded: show a single-line snippet of the reasoning instead of
 		// just a size summary.
 		preview := firstLine(msg.Content)
-		maxW := m.width - lipgloss.Width(head) - 3
+		maxW := m.width - lipgloss.Width(plain) - 3
 		if maxW < 16 {
 			maxW = 16
 		}
 		if preview != "" {
-			head += m.muted().Render(" · " + truncate(preview, maxW))
+			preview = truncate(preview, maxW)
+			plain += " · " + preview
+			head += m.muted().Render(" · " + preview)
 		}
+	}
+	if m.selected == index {
+		// Highlight only the header row; an expanded block keeps its body.
+		head = m.highlightRow(plain)
+	}
+	if !expanded {
 		return []string{head}
 	}
 
@@ -1016,14 +1401,36 @@ func (m *ViewModel) reasoningBodyLines(content string, style lipgloss.Style) []s
 // reasoningMarker returns the fold marker for a reasoning/tool block.
 // Selected blocks show the marker in the accent color.
 func (m *ViewModel) reasoningMarker(expanded bool, selected bool) string {
-	glyph := "▸"
-	if expanded {
-		glyph = "▾"
-	}
+	glyph := foldGlyph(expanded)
 	if selected {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Accent)).Bold(true).Render(glyph)
 	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).Render(glyph)
+}
+
+// foldGlyph returns the plain-text fold marker.
+func foldGlyph(expanded bool) string {
+	if expanded {
+		return "▾"
+	}
+	return "▸"
+}
+
+// highlightRow renders the selected foldable row as a full-width bar, so the
+// Tab selection is visible across the whole line instead of on the marker.
+func (m *ViewModel) highlightRow(text string) string {
+	fg := "#FFFFFF"
+	if m.darkMode {
+		fg = "#111827" // dark text reads better on the light-ish dark palettes
+	}
+	style := lipgloss.NewStyle().
+		Background(lipgloss.Color(m.theme.Primary)).
+		Foreground(lipgloss.Color(fg)).
+		Bold(true)
+	if m.width > 0 {
+		style = style.Width(m.width)
+	}
+	return style.Render(" " + text)
 }
 
 // renderAssistantContent renders streaming (or generic) markdown content.
@@ -1062,17 +1469,26 @@ func (m *ViewModel) renderToolMessage(msg *Message, index int) []string {
 	name := lipgloss.NewStyle().Bold(true).Render(msg.Name)
 
 	expanded := m.expanded[index]
-	parts := []string{m.reasoningMarker(expanded, m.selected == index), dot, name}
+	parts := []string{m.reasoningMarker(expanded, false), dot, name}
+	plainParts := []string{foldGlyph(expanded), "●", msg.Name}
 	if args := summarizeArgs(msg.Arguments); args != "" {
 		parts = append(parts, m.muted().Render(args))
+		plainParts = append(plainParts, args)
 	}
 	if msg.ToolStatus == ToolWaiting {
 		parts = append(parts, m.muted().Render("running..."))
+		plainParts = append(plainParts, "running...")
 	} else if msg.EndTime > 0 && msg.StartTime > 0 {
-		parts = append(parts, m.muted().Render(fmt.Sprintf("%ds", msg.EndTime-msg.StartTime)))
+		duration := fmt.Sprintf("%ds", msg.EndTime-msg.StartTime)
+		parts = append(parts, m.muted().Render(duration))
+		plainParts = append(plainParts, duration)
 	}
 
-	lines := []string{strings.Join(parts, " ")}
+	head := strings.Join(parts, " ")
+	if m.selected == index {
+		head = m.highlightRow(strings.Join(plainParts, " "))
+	}
+	lines := []string{head}
 
 	// Result details only when expanded; folded calls stay single-line.
 	if expanded && msg.ToolStatus != ToolWaiting && msg.Result != "" {
@@ -1102,30 +1518,59 @@ func (m *ViewModel) toolResultLines(msg *Message) []string {
 	return lines
 }
 
-// renderErrorMessage renders error content in red, supporting multiple lines
-// (command errors often include a usage line plus candidate lists).
-func (m *ViewModel) renderErrorMessage(content string) []string {
+// renderErrorMessage renders an error block in red. Like reasoning and tool
+// blocks it starts folded: only the first line is shown until the block is
+// selected and expanded (Tab + Ctrl+O, or a click).
+func (m *ViewModel) renderErrorMessage(msg *Message, index int) []string {
 	icon := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Error)).Bold(true).Render("✗")
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Error))
 
-	var lines []string
-	first := true
-	for _, raw := range strings.Split(strings.TrimSpace(content), "\n") {
+	content := strings.TrimSpace(msg.Content)
+	expanded := index >= 0 && m.expanded[index]
+	selected := index >= 0 && m.selected == index
+	glyph := foldGlyph(expanded)
+
+	// Wrap once: the first line is the summary, the rest are details.
+	var body []string
+	for _, raw := range strings.Split(content, "\n") {
 		if strings.TrimSpace(raw) == "" {
 			continue
 		}
 		for _, wrapped := range wrapLines([]string{raw}, m.width) {
-			text := strings.TrimSpace(wrapped)
-			if first {
-				lines = append(lines, icon+" "+style.Render(text))
-				first = false
-			} else {
-				lines = append(lines, "   "+style.Render(text))
-			}
+			body = append(body, strings.TrimSpace(wrapped))
 		}
 	}
-	if len(lines) == 0 {
-		lines = append(lines, " "+icon)
+
+	if !expanded {
+		// Folded: keep only the first line (model errors often append a
+		// multi-line node path after the actual message).
+		if len(body) == 0 {
+			if selected {
+				return []string{m.highlightRow(glyph + " ✗")}
+			}
+			return []string{m.reasoningMarker(false, false) + " " + icon}
+		}
+		first := truncate(body[0], maxInt(m.width-5, 10)) // marker + space + icon + space
+		if selected {
+			return []string{m.highlightRow(glyph + " ✗ " + first)}
+		}
+		return []string{m.reasoningMarker(false, false) + " " + icon + " " + style.Render(first)}
+	}
+
+	lines := make([]string, 0, len(body)+1)
+	if len(body) == 0 {
+		if selected {
+			return []string{m.highlightRow(glyph + " ✗"), ""}
+		}
+		return []string{m.reasoningMarker(true, false) + " " + icon, ""}
+	}
+	if selected {
+		lines = append(lines, m.highlightRow(glyph+" ✗ "+body[0]))
+	} else {
+		lines = append(lines, m.reasoningMarker(true, false)+" "+icon+" "+style.Render(body[0]))
+	}
+	for _, text := range body[1:] {
+		lines = append(lines, "   "+style.Render(text))
 	}
 	lines = append(lines, "")
 	return lines
@@ -1145,6 +1590,93 @@ func (m *ViewModel) renderInfoMessage(content string) []string {
 	return lines
 }
 
+// todoPanelLines renders the task list panel (empty when there are no tasks).
+func (m *ViewModel) todoPanelLines() []string {
+	if len(m.todos) == 0 {
+		return nil
+	}
+	done := 0
+	for _, item := range m.todos {
+		if item.Status == TodoCompleted {
+			done++
+		}
+	}
+
+	width := maxInt(m.width-9, 10)
+	head := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Primary)).Bold(true).
+		Render(fmt.Sprintf("☑ 任务 %d/%d", done, len(m.todos)))
+	if m.todosCollapsed {
+		return []string{" " + head + m.muted().Render("  · 已折叠，点击展开")}
+	}
+	lines := []string{" " + head}
+
+	const maxShown = 8
+	for i, item := range m.todos {
+		if i >= maxShown {
+			lines = append(lines, m.muted().Render(fmt.Sprintf("   … 还有 %d 项", len(m.todos)-maxShown)))
+			break
+		}
+		glyph := "○"
+		style := m.muted()
+		switch item.Status {
+		case TodoCompleted:
+			glyph = "✔"
+			style = lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Success))
+		case TodoInProgress:
+			glyph = "▸"
+			style = lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Warning)).Bold(true)
+		}
+		lines = append(lines, "   "+style.Render(glyph+" "+truncate(item.Content, width)))
+	}
+	return lines
+}
+
+// questionPanelLines renders the pending ask_user question and its options.
+func (m *ViewModel) questionPanelLines() []string {
+	q := m.question
+	if q == nil {
+		return nil
+	}
+	width := maxInt(m.width-10, 10)
+	title := "❓ "
+	if q.approval {
+		title = "⚠ 工具审批："
+	}
+	head := m.warningStyle(true).Render(title + truncate(q.question, width))
+	lines := []string{" " + head}
+	if q.detail != "" && q.approval {
+		detail := strings.ReplaceAll(q.detail, "\n", " ")
+		lines = append(lines, m.muted().Render("   "+truncate(detail, width)))
+	}
+
+	if len(q.options) > 0 && !q.typing {
+		const maxOptions = 6
+		sel := q.sel
+		if sel < 0 || sel >= len(q.options) {
+			sel = 0
+		}
+		for i, opt := range q.options {
+			if i >= maxOptions {
+				lines = append(lines, m.muted().Render(fmt.Sprintf("     … 还有 %d 个选项", len(q.options)-maxOptions)))
+				break
+			}
+			marker := "  "
+			if i == sel {
+				marker = lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Accent)).Bold(true).Render("❯ ")
+			}
+			lines = append(lines, "   "+marker+fmt.Sprintf("%d. %s", i+1, truncate(opt, width)))
+		}
+		hint := "   ↑↓ 选择 · enter 确认 · 直接输入自定义回答 · esc 取消"
+		if q.approval {
+			hint = "   ↑↓ 选择 · enter 确认 · esc 拒绝"
+		}
+		lines = append(lines, m.muted().Render(hint))
+	} else {
+		lines = append(lines, m.muted().Render("   enter 提交回答 · esc 取消"))
+	}
+	return lines
+}
+
 // View renders the interface
 func (m *ViewModel) View() string {
 	if m.width == 0 {
@@ -1161,6 +1693,7 @@ func (m *ViewModel) View() string {
 	if start < 0 {
 		start = 0
 	}
+	m.viewStart = start // remembered for mouse hit-testing
 	end := start + viewport
 	if end > total {
 		end = total
@@ -1176,7 +1709,14 @@ func (m *ViewModel) View() string {
 	// ---- Header: title left, status right ----
 	statusText := "ready"
 	statusDot := m.theme.Success
-	if m.isWaiting {
+	if m.question != nil {
+		statusText = "question"
+		statusDot = m.theme.Accent
+		if m.question.approval {
+			statusText = "approval"
+			statusDot = m.theme.Warning
+		}
+	} else if m.isWaiting {
 		statusText = "thinking"
 		statusDot = m.theme.Warning
 	} else if m.errorMsg != "" {
@@ -1202,6 +1742,14 @@ func (m *ViewModel) View() string {
 	var inputLine string
 	if m.confirmQuit {
 		inputLine = m.warningStyle(true).Render("⚠ 再按一次 Ctrl+C 退出（任意其他键取消）")
+	} else if m.question != nil {
+		// Answering a question keeps the input editable while the turn waits.
+		prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Accent)).Bold(true).Render("?")
+		inputLine = prompt + " " + m.renderEditableInput()
+		maxCells := m.width - 9
+		if w := lipgloss.Width(inputLine); w > maxCells {
+			inputLine = ansi.TruncateLeft(inputLine, w-maxCells, "…")
+		}
 	} else if m.isWaiting {
 		inputLine = m.muted().Render("⏳ waiting for response... (ctrl+c to quit)")
 	} else {
@@ -1225,7 +1773,7 @@ func (m *ViewModel) View() string {
 	}
 
 	// ---- Help / status bar ----
-	helpLeft := m.muted().Render("↑↓ scroll · tab select · ctrl+o fold · enter send · /help · ctrl+y mouse · ctrl+c quit")
+	helpLeft := m.muted().Render("↑↓ scroll · tab select · ctrl+o fold · enter send · /help · ctrl+y mouse/click · ctrl+c quit")
 
 	scrollInfo := ""
 	if total > viewport {
@@ -1237,14 +1785,21 @@ func (m *ViewModel) View() string {
 	}
 	helpBar := joinRow(helpLeft, scrollInfo, m.width-2)
 
-	// Layout (top to bottom): header, rule, messages, help bar, command
-	// palette, input box. The input box is always the bottom-most element
-	// and never moves when the palette appears.
-	parts := []string{header, rule, messageArea, helpBar}
+	// Layout (top to bottom): header, rule, messages, task panel, question
+	// prompt / command palette, input box, help bar. The input box stays in a
+	// fixed position when a panel appears, and the hint line sits directly
+	// below it as the bottom-most row.
+	parts := []string{header, rule, messageArea}
+	if todoPanel := m.todoPanelLines(); len(todoPanel) > 0 {
+		parts = append(parts, strings.Join(todoPanel, "\n"))
+	}
+	if questionPanel := m.questionPanelLines(); len(questionPanel) > 0 {
+		parts = append(parts, strings.Join(questionPanel, "\n"))
+	}
 	if paletteArea != "" {
 		parts = append(parts, paletteArea)
 	}
-	parts = append(parts, inputArea)
+	parts = append(parts, inputArea, helpBar)
 
 	// Hard-clip every line to the terminal width: wrapped lines break the
 	// renderer's cursor accounting and leave artifacts after resizes.

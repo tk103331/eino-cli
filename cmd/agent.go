@@ -2,24 +2,39 @@ package cmd
 
 import (
 	"fmt"
-	"sort"
-	"strings"
 
 	"github.com/cloudwego/eino-ext/callbacks/langfuse"
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/spf13/cobra"
 	"github.com/tk103331/eino-cli/config"
 	"github.com/tk103331/eino-cli/state"
+	"github.com/tk103331/eino-cli/tools"
 	"github.com/tk103331/eino-cli/ui/agent"
 )
 
 // builtinAgentName is the implicit agent used when the config does not define
 // any agent and no previous agent is available.
-const builtinAgentName = "builtin"
+const builtinAgentName = "Eino"
 
-// builtinAgentSystem is the system prompt of the built-in basic agent.
+// builtinAgentSystem is the system prompt of the built-in agent.
 const builtinAgentSystem = "You are Eino CLI, a concise and helpful AI assistant. " +
 	"Answer clearly and briefly. Use tools only when they are available and relevant."
+
+// builtinToolDefaults are the tools enabled on the built-in agent by default.
+// The agent refers to them by name; the config entry is only created when the
+// user has not defined one, so custom settings always win.
+var builtinToolDefaults = []struct {
+	name string
+	typ  string
+}{
+	{"commandline", "commandline"},
+	{"filesystem", "filesystem"},
+	{"httprequest", "httprequest"},
+	{"browseruse", "browseruse"},
+	{tools.SubagentToolName, tools.SubagentToolType},
+	{tools.AskUserToolName, tools.AskUserToolType},
+	{tools.TodoToolName, tools.TodoToolType},
+}
 
 // ensureBuiltinAgent registers the built-in agent when it is missing and
 // returns its name. Its model is default_model when configured, otherwise the
@@ -32,17 +47,20 @@ func ensureBuiltinAgent(cfg *config.Config) (string, error) {
 		return builtinAgentName, nil
 	}
 
-	model := cfg.DefaultModel
-	if _, ok := cfg.Models[model]; model == "" || !ok {
-		names := make([]string, 0, len(cfg.Models))
-		for name := range cfg.Models {
-			names = append(names, name)
+	model := cfg.DefaultModelName()
+	if model == "" {
+		return "", fmt.Errorf("没有可用的模型配置：请在 config.yml 的 models 中添加模型")
+	}
+
+	if cfg.Tools == nil {
+		cfg.Tools = make(map[string]config.Tool)
+	}
+	defaultTools := make([]string, 0, len(builtinToolDefaults))
+	for _, def := range builtinToolDefaults {
+		if _, ok := cfg.Tools[def.name]; !ok {
+			cfg.Tools[def.name] = config.Tool{Type: def.typ}
 		}
-		if len(names) == 0 {
-			return "", fmt.Errorf("没有可用的模型配置：请在 config.yml 的 models 中添加模型")
-		}
-		sort.Strings(names)
-		model = names[0]
+		defaultTools = append(defaultTools, def.name)
 	}
 
 	if cfg.Agents == nil {
@@ -51,6 +69,7 @@ func ensureBuiltinAgent(cfg *config.Config) (string, error) {
 	cfg.Agents[builtinAgentName] = config.Agent{
 		System: builtinAgentSystem,
 		Model:  model,
+		Tools:  defaultTools,
 	}
 	return builtinAgentName, nil
 }
@@ -100,11 +119,12 @@ func startAgentSession(agentName string) error {
 
 var agentCmd = &cobra.Command{
 	Use:   "agent",
-	Short: "Start interactive agent or chat session",
+	Short: "Start an interactive agent session",
 	Long: `Start an interactive agent session with the specified agent using a TUI interface.
 
 Without arguments it opens the last used agent; if none is available it falls
-back to the built-in basic agent. Also supports direct chat with models.`,
+back to the built-in Eino agent, which has commandline, filesystem,
+httprequest, browseruse, subagent, ask_user and todolist enabled.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := config.GetConfig()
 
@@ -116,52 +136,8 @@ back to the built-in basic agent. Also supports direct chat with models.`,
 
 		// Get parameters
 		agentName, _ := cmd.Flags().GetString("agent")
-		chatName, _ := cmd.Flags().GetString("chat")
-		modelName, _ := cmd.Flags().GetString("model")
-		toolsStr, _ := cmd.Flags().GetString("tools")
-
-		// Prioritize using agent mode
 		if agentName != "" {
 			return startAgentSession(agentName)
-		}
-
-		if chatName != "" || modelName != "" {
-			// Use chat mode
-			var system string
-			var tools []string
-
-			if chatName != "" {
-				// Use chats preset
-				preset, ok := cfg.Chats[chatName]
-				if !ok {
-					return fmt.Errorf("chat preset does not exist: %s", chatName)
-				}
-				modelName = preset.Model
-				tools = append(tools, preset.Tools...)
-				system = preset.System
-			} else {
-				// Parse tool list
-				if toolsStr != "" {
-					tools = strings.Split(toolsStr, ",")
-					// Remove whitespace
-					for i, tool := range tools {
-						tools[i] = strings.TrimSpace(tool)
-					}
-				}
-				if modelName == "" {
-					return fmt.Errorf("must specify --model or --chat preset name")
-				}
-			}
-
-			// Create chat application
-			chatApp := agent.NewChatApp(modelName, tools, system)
-
-			// Run chat interface
-			fmt.Printf("Starting chat session with Model %s...\n", modelName)
-			if err := chatApp.Run(); err != nil {
-				return fmt.Errorf("failed to run chat interface: %w", err)
-			}
-			return nil
 		}
 
 		// No flags: resume the last agent, or start the built-in agent.
@@ -179,7 +155,4 @@ func init() {
 
 	// Add parameters for agent subcommand
 	agentCmd.Flags().StringP("agent", "a", "", "Specify the Agent name to use")
-	agentCmd.Flags().StringP("chat", "c", "", "Specify chat preset name (from config file chats)")
-	agentCmd.Flags().StringP("model", "m", "", "Specify the Model to chat with (required when --chat is not specified)")
-	agentCmd.Flags().StringP("tools", "t", "", "Specify available tools, separated by commas (optional when --chat is not specified)")
 }

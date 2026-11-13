@@ -23,7 +23,7 @@ var RootCmd = &cobra.Command{
 	Long:    `A command line interface for Eino`,
 	Version: version.Version,
 	// Running without a subcommand opens the interactive agent: the last used
-	// agent when available, otherwise the built-in basic agent.
+	// agent when available, otherwise the built-in Eino agent.
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
 			return cmd.Help()

@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/tk103331/eino-cli/config"
+	"github.com/tk103331/eino-cli/tools/approval"
 )
 
 // shellTool runs a shell command on the local system.
@@ -74,6 +75,16 @@ func (t *shellTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 
 type shellInput struct {
 	Command string `json:"command"`
+}
+
+// ApprovalRequest flags every shell command: the tool can do anything.
+func (t *shellTool) ApprovalRequest(arguments string) (approval.Request, bool) {
+	var in shellInput
+	summary := "运行 shell 命令"
+	if err := json.Unmarshal([]byte(arguments), &in); err == nil && strings.TrimSpace(in.Command) != "" {
+		summary = "运行命令：" + strings.TrimSpace(in.Command)
+	}
+	return approval.Request{Tool: t.info.Name, Summary: summary, Detail: arguments}, true
 }
 
 func (t *shellTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {

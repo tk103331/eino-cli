@@ -5,6 +5,7 @@ import (
 
 	"github.com/tk103331/eino-cli/config"
 	"github.com/tk103331/eino-cli/state"
+	"github.com/tk103331/eino-cli/tools"
 )
 
 func TestEnsureBuiltinAgentUsesDefaultModel(t *testing.T) {
@@ -32,6 +33,55 @@ func TestEnsureBuiltinAgentUsesDefaultModel(t *testing.T) {
 	}
 	if agent.System == "" {
 		t.Fatal("builtin agent system prompt missing")
+	}
+
+	// The built-in agent ships with a default tool set, and every tool it
+	// references has a config entry.
+	want := []string{
+		"commandline", "filesystem", "httprequest", "browseruse",
+		tools.SubagentToolName, tools.AskUserToolName, tools.TodoToolName,
+	}
+	if len(agent.Tools) != len(want) {
+		t.Fatalf("tools = %v, want %v", agent.Tools, want)
+	}
+	for i, name := range want {
+		if agent.Tools[i] != name {
+			t.Fatalf("tools[%d] = %q, want %q", i, agent.Tools[i], name)
+		}
+		if _, ok := cfg.Tools[name]; !ok {
+			t.Fatalf("default tool config missing: %s", name)
+		}
+	}
+}
+
+func TestEnsureBuiltinAgentKeepsCustomToolConfig(t *testing.T) {
+	cfg := &config.Config{
+		Models: map[string]config.Model{"m": {Provider: "p", Model: "m"}},
+		Tools: map[string]config.Tool{
+			"commandline": {Type: "commandline", Description: "my shell"},
+		},
+	}
+
+	if _, err := ensureBuiltinAgent(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Tools["commandline"].Description; got != "my shell" {
+		t.Fatalf("custom tool config was overwritten: %q", got)
+	}
+	if _, ok := cfg.Tools["filesystem"]; !ok {
+		t.Fatal("missing default filesystem tool")
+	}
+
+	// A user-defined agent with the built-in name is left untouched.
+	cfg2 := &config.Config{
+		Models: map[string]config.Model{"m": {Provider: "p", Model: "m"}},
+		Agents: map[string]config.Agent{"Eino": {Model: "m", Tools: []string{"custom"}}},
+	}
+	if _, err := ensureBuiltinAgent(cfg2); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg2.Agents["Eino"].Tools; len(got) != 1 || got[0] != "custom" {
+		t.Fatalf("user-defined Eino agent changed: %v", got)
 	}
 }
 
@@ -71,7 +121,7 @@ func TestResolveDefaultAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if name != builtinAgentName {
-		t.Fatalf("default = %q, want builtin", name)
+		t.Fatalf("default = %q, want builtinAgentName", name)
 	}
 
 	// A previous agent that still exists wins.
@@ -96,6 +146,6 @@ func TestResolveDefaultAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if name != builtinAgentName {
-		t.Fatalf("default = %q, want builtin for stale last agent", name)
+		t.Fatalf("default = %q, want builtinAgentName for stale last agent", name)
 	}
 }

@@ -59,7 +59,7 @@ func (m *ViewModel) executeSlashCommand(line string) {
 
 	switch strings.ToLower(name) {
 	case "clear":
-		m.clearChat()
+		m.clearConversation()
 		return
 	case "help":
 		m.appendCommandMessage(m.helpText(), false)

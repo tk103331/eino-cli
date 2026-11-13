@@ -21,6 +21,7 @@ import (
 	"github.com/tk103331/eino-cli/logger"
 	"github.com/tk103331/eino-cli/mcp"
 	"github.com/tk103331/eino-cli/models"
+	"github.com/tk103331/eino-cli/tools"
 )
 
 // ReactAgent implements Agent using React pattern from cloudwego/eino library
@@ -578,6 +579,21 @@ func (r *ReactAgent) Init() error {
 	return nil
 }
 
+// buildMessages assembles the system prompt, the prior conversation turns and
+// the current user prompt into the message list for one model call.
+func (r *ReactAgent) buildMessages(history []*schema.Message, prompt string) []*schema.Message {
+	messages := make([]*schema.Message, 0, len(history)+2)
+	if strings.TrimSpace(r.config.System) != "" {
+		messages = append(messages, schema.SystemMessage(r.config.System))
+	}
+	for _, msg := range history {
+		if msg != nil {
+			messages = append(messages, msg)
+		}
+	}
+	return append(messages, schema.UserMessage(prompt))
+}
+
 // Run runs Agent with optimized output formatting
 func (r *ReactAgent) Run(prompt string) error {
 	if r.agent == nil {
@@ -587,7 +603,7 @@ func (r *ReactAgent) Run(prompt string) error {
 	}
 
 	// Use ChatStream method with optimized output formatting
-	return r.ChatStream(r.ctx, prompt, func(chunk *StreamChunk) {
+	return r.ChatStream(r.ctx, nil, prompt, func(chunk *StreamChunk) {
 		switch chunk.Type {
 		case "content":
 			if chunk.Content != "" {
@@ -657,7 +673,7 @@ func (r *ReactAgent) Run(prompt string) error {
 }
 
 // Chat performs conversation, returns response content
-func (r *ReactAgent) Chat(ctx context.Context, prompt string) (string, error) {
+func (r *ReactAgent) Chat(ctx context.Context, history []*schema.Message, prompt string) (string, error) {
 	if r.agent == nil {
 		if err := r.Init(); err != nil {
 			return "", err
@@ -665,10 +681,8 @@ func (r *ReactAgent) Chat(ctx context.Context, prompt string) (string, error) {
 	}
 
 	// Create messages
-	messages := []*schema.Message{
-		schema.SystemMessage(r.config.System),
-		schema.UserMessage(prompt),
-	}
+	messages := r.buildMessages(history, prompt)
+	ctx = r.withActiveModel(ctx)
 
 	// Use Generate method for synchronous call
 	response, err := r.agent.Generate(ctx, messages)
@@ -680,7 +694,7 @@ func (r *ReactAgent) Chat(ctx context.Context, prompt string) (string, error) {
 }
 
 // ChatWithCallback performs conversation with streaming output and callback support
-func (r *ReactAgent) ChatWithCallback(ctx context.Context, prompt string, callback func(interface{})) (string, error) {
+func (r *ReactAgent) ChatWithCallback(ctx context.Context, history []*schema.Message, prompt string, callback func(interface{})) (string, error) {
 	if r.agent == nil {
 		if err := r.Init(); err != nil {
 			return "", err
@@ -688,10 +702,8 @@ func (r *ReactAgent) ChatWithCallback(ctx context.Context, prompt string, callba
 	}
 
 	// Create messages
-	messages := []*schema.Message{
-		schema.SystemMessage(r.config.System),
-		schema.UserMessage(prompt),
-	}
+	messages := r.buildMessages(history, prompt)
+	ctx = r.withActiveModel(ctx)
 
 	// If no callback function, use Generate method directly
 	if callback == nil {
@@ -746,7 +758,7 @@ func (r *ReactAgent) ChatWithCallback(ctx context.Context, prompt string, callba
 }
 
 // ChatStream performs streaming conversation, handles streaming output via chunk callback
-func (r *ReactAgent) ChatStream(ctx context.Context, prompt string, chunkCallback func(*StreamChunk), toolCallback func(interface{})) error {
+func (r *ReactAgent) ChatStream(ctx context.Context, history []*schema.Message, prompt string, chunkCallback func(*StreamChunk), toolCallback func(interface{})) error {
 	if r.agent == nil {
 		if err := r.Init(); err != nil {
 			return err
@@ -754,10 +766,8 @@ func (r *ReactAgent) ChatStream(ctx context.Context, prompt string, chunkCallbac
 	}
 
 	// Create messages
-	messages := []*schema.Message{
-		schema.SystemMessage(r.config.System),
-		schema.UserMessage(prompt),
-	}
+	messages := r.buildMessages(history, prompt)
+	ctx = r.withActiveModel(ctx)
 
 	// Log the messages for debugging
 	logger.Info("AGENT", "Starting ChatStream with messages:")
@@ -873,6 +883,19 @@ func (r *ReactAgent) ChatStream(ctx context.Context, prompt string, chunkCallbac
 	return nil
 }
 
+// withActiveModel annotates ctx with the model this agent runs, so nested
+// agents (the subagent tool) inherit the current model — including a runtime
+// /model switch, which is already folded into r.config by the caller.
+func (r *ReactAgent) withActiveModel(ctx context.Context) context.Context {
+	name := r.config.Model
+	if name == "" {
+		if cfg := config.GetConfig(); cfg != nil {
+			name = cfg.DefaultModelName()
+		}
+	}
+	return tools.WithActiveModel(ctx, name)
+}
+
 // createModel creates model
 func (r *ReactAgent) createModel() (model.ToolCallingChatModel, error) {
 	// Get global configuration from Factory
@@ -884,8 +907,17 @@ func (r *ReactAgent) createModel() (model.ToolCallingChatModel, error) {
 	// Create model factory
 	factory := models.NewFactory(globalCfg)
 
+	// An agent without its own model follows the default model.
+	modelName := r.config.Model
+	if modelName == "" {
+		modelName = globalCfg.DefaultModelName()
+	}
+	if modelName == "" {
+		return nil, fmt.Errorf("no model configured for agent %q", r.agentName)
+	}
+
 	// Use factory to create model
-	return factory.CreateChatModel(r.ctx, r.config.Model)
+	return factory.CreateChatModel(r.ctx, modelName)
 }
 
 // createToolsConfig creates tools configuration
@@ -953,6 +985,13 @@ func (r *ReactAgent) createToolsConfig() (compose.ToolsNodeConfig, error) {
 	} else {
 		logger.Info("AGENT", "No MCP servers configured")
 	}
+
+	// Wrap every tool (built-in and MCP) with the approval policy.
+	wrapped, err := wrapApprovals(toolsConfig.Tools)
+	if err != nil {
+		return toolsConfig, err
+	}
+	toolsConfig.Tools = wrapped
 
 	logger.Info("AGENT", fmt.Sprintf("Total tools available: %d", len(toolsConfig.Tools)))
 	return toolsConfig, nil

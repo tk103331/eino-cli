@@ -197,11 +197,11 @@ func TestPaletteEnterSubLevelAndBottomInput(t *testing.T) {
 		t.Fatalf("agent selection list missing cursor:\n%s", out)
 	}
 
-	// The input box is the bottom-most element (below the help bar).
+	// The help bar is the bottom-most element, directly below the input box.
 	helpIdx := strings.LastIndex(out, "↑↓ scroll")
 	inputIdx := strings.LastIndex(out, "╭")
-	if helpIdx < 0 || inputIdx < 0 || inputIdx < helpIdx {
-		t.Fatalf("input box should be below the help bar (help=%d input=%d)", helpIdx, inputIdx)
+	if helpIdx < 0 || inputIdx < 0 || helpIdx < inputIdx {
+		t.Fatalf("help bar should be below the input box (input=%d help=%d)", inputIdx, helpIdx)
 	}
 }
 

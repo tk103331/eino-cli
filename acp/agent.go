@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/coder/acp-go-sdk"
 	"github.com/tk103331/eino-cli/agent"
 	"github.com/tk103331/eino-cli/config"
@@ -36,9 +37,10 @@ var _ acp.Agent = (*Service)(nil)
 
 // session holds one ACP conversation context.
 type session struct {
-	id    string
-	cwd   string
-	agent agent.Agent
+	id      string
+	cwd     string
+	agent   agent.Agent
+	history []*schema.Message // prior turns, replayed into every prompt
 
 	running        bool
 	toolSeq        int
@@ -148,8 +150,20 @@ func (s *Service) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pro
 
 	logger.Info("ACP", fmt.Sprintf("prompt received: session=%s text=%q", sid, truncate(prompt, 200)))
 
-	err := session.agent.ChatStream(ctx, prompt,
-		s.makeChunkCallback(ctx, sid),
+	// Replay this session's prior turns so the conversation keeps its context.
+	s.mu.Lock()
+	history := append([]*schema.Message(nil), session.history...)
+	s.mu.Unlock()
+
+	var answer strings.Builder
+	chunkCallback := s.makeChunkCallback(ctx, sid)
+	err := session.agent.ChatStream(ctx, history, prompt,
+		func(chunk *agent.StreamChunk) {
+			if chunk.Type == "content" && chunk.Content != "" {
+				answer.WriteString(chunk.Content)
+			}
+			chunkCallback(chunk)
+		},
 		s.makeToolCallback(ctx, sid, session),
 	)
 
@@ -162,6 +176,14 @@ func (s *Service) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pro
 		s.sendUpdate(ctx, sid, acp.UpdateAgentMessageText(fmt.Sprintf("\n\n❌ Agent error: %v", err)))
 		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 	}
+
+	// Record the completed turn for the next prompt.
+	s.mu.Lock()
+	session.history = append(session.history, schema.UserMessage(prompt))
+	if text := strings.TrimSpace(answer.String()); text != "" {
+		session.history = append(session.history, schema.AssistantMessage(text, nil))
+	}
+	s.mu.Unlock()
 
 	logger.Info("ACP", fmt.Sprintf("prompt completed: session=%s", sid))
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil

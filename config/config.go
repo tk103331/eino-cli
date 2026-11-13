@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/cloudwego/eino-ext/callbacks/langfuse"
 	"os"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,7 +20,6 @@ type Config struct {
 	DefaultModel string               `yaml:"default_model,omitempty"`
 	MCPServers   map[string]MCPServer `yaml:"mcp_servers,omitempty"`
 	Tools        map[string]Tool      `yaml:"tools,omitempty"`
-	Chats        map[string]Chat      `yaml:"chats,omitempty"`
 	Skills       map[string]Skill     `yaml:"skills,omitempty"`
 	Settings     Settings             `yaml:"settings,omitempty"`
 }
@@ -30,13 +30,6 @@ type Agent struct {
 	Model      string   `yaml:"model"`
 	Tools      []string `yaml:"tools,omitempty"`
 	MCPServers []string `yaml:"mcp_servers,omitempty"`
-}
-
-// Chat represents preset chat configuration
-type Chat struct {
-	System string   `yaml:"system,omitempty"`
-	Model  string   `yaml:"model"`
-	Tools  []string `yaml:"tools,omitempty"`
 }
 
 // Skill represents an optional capability preset that can be switched on at
@@ -95,7 +88,61 @@ type ToolParam struct {
 
 // Settings global settings
 type Settings struct {
-	Langfuse *langfuse.Config
+	Langfuse *langfuse.Config `yaml:"langfuse,omitempty"`
+	Approval *ApprovalConfig  `yaml:"approval,omitempty"`
+}
+
+// ApprovalConfig controls which tool calls must be confirmed by the user in
+// interactive sessions (agent/chat TUI).
+//
+// Mode is one of:
+//   - off: never ask
+//   - dangerous: ask only for calls a tool flags as mutating (default)
+//   - all: ask before every tool call
+//
+// Allow lists tool names that never need approval; Always lists tools that
+// always do (useful for MCP tools, which cannot be classified).
+type ApprovalConfig struct {
+	Mode   string   `yaml:"mode,omitempty"`
+	Allow  []string `yaml:"allow,omitempty"`
+	Always []string `yaml:"always,omitempty"`
+}
+
+// DefaultModelName returns the effective default model: `default_model` when it
+// names a configured model, otherwise the alphabetically first configured
+// model. It returns "" when no model is configured.
+func (c *Config) DefaultModelName() string {
+	if c == nil {
+		return ""
+	}
+	if c.DefaultModel != "" {
+		if _, ok := c.Models[c.DefaultModel]; ok {
+			return c.DefaultModel
+		}
+	}
+	if len(c.Models) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(c.Models))
+	for name := range c.Models {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names[0]
+}
+
+// AgentUsesDefaultModel reports whether the agent follows the effective default
+// model (its model is unset or equal to it). Agents that pin their own model in
+// the config keep it, so they are not "default model" agents.
+func (c *Config) AgentUsesDefaultModel(agentName string) bool {
+	if c == nil {
+		return false
+	}
+	ac, ok := c.Agents[agentName]
+	if !ok {
+		return false
+	}
+	return ac.Model == "" || ac.Model == c.DefaultModelName()
 }
 
 // LoadConfig loads configuration from file and saves to global variable
