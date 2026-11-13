@@ -131,8 +131,6 @@ github.com/cloudwego/eino-ext/components/tool/bingsearch v0.0.0-20261109121412-f
 github.com/cloudwego/eino-ext/components/tool/bingsearch v0.0.0-20261109121412-fa3cb9b7ad6a/go.mod h1:0TISLP4ohxhkVCxTN/caLW9f4K/iOGzWZ0C2GAR7utI=
 github.com/cloudwego/eino-ext/components/tool/browseruse v0.0.0-20250905035413-86dbae6351d5 h1:oe4y332k0zV7j00buhZdJegeBnHfzAY83yROD9TgNy0=
 github.com/cloudwego/eino-ext/components/tool/browseruse v0.0.0-20250905035413-86dbae6351d5/go.mod h1:kirpegBWzfp7sKXgch5xb1DBEZVcBDIVCOVcuBnd+k4=
-github.com/cloudwego/eino-ext/components/tool/commandline v0.0.0-20250905035413-86dbae6351d5 h1:fsk6BMZcB+PSuMEbVDgek6xkPznELfcUa4u79vlsqrc=
-github.com/cloudwego/eino-ext/components/tool/commandline v0.0.0-20250905035413-86dbae6351d5/go.mod h1:Ro6u8M4lPc6r6oRWaKnGz/sJnY60GpYKsxpUK/yr01k=
 github.com/cloudwego/eino-ext/components/tool/duckduckgo v0.0.0-20250905035413-86dbae6351d5 h1:QXvFwTFC5cWYfZV+lcJxPQkeVHuI6cxoVk3tk8Azf8s=
 github.com/cloudwego/eino-ext/components/tool/duckduckgo v0.0.0-20250905035413-86dbae6351d5/go.mod h1:RwtbhEnfY79+CoCdG8mVrn8p7WhgzmcgMWPtx2WrIf4=
 github.com/cloudwego/eino-ext/components/tool/duckduckgo/v2 v2.0.0-20261109121412-fa3cb9b7ad6a h1:JOIaedfmWkkgvpgK2hGjEMRI+9h0p4fOgM6SMdU56IQ=
@@ -388,7 +386,6 @@ github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+
 github.com/stretchr/objx v0.1.1/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.4.0/go.mod h1:YvHI0jy2hoMjB+UWwv71VJQ9isScKT/TqJzVSSt89Yw=
 github.com/stretchr/objx v0.5.0/go.mod h1:Yh+to48EsGEfYuaHDzXPcE3xhTkx73EhmCGUpEOglKo=
-github.com/stretchr/objx v0.5.2 h1:xuMeJ0Sdp5ZMRXx/aWO6RZxdr3beISkG5/G/aIRr3pY=
 github.com/stretchr/objx v0.5.2/go.mod h1:FRsXN1f5AsAjCGJKqEizvkpNtU+EGNCLh3NxZ/8L+MA=
 github.com/stretchr/testify v1.2.2/go.mod h1:a8OnRcib4nhh0OaRAV+Yts87kKdq0PP7pXfy6kDkUVs=
 github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
