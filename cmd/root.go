@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/tk103331/eino-cli/config"
@@ -14,20 +15,22 @@ import (
 
 var (
 	configPath string
+	workDir    string
 )
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
-	Use:     "eino-cli",
-	Short:   "Eino CLI tool",
-	Long:    `A command line interface for Eino`,
+	Use:   "eino-cli [directory]",
+	Short: "Eino CLI tool",
+	Long: `A command line interface for Eino.
+
+Optionally pass a working directory; tools resolve relative paths against it.
+The same directory can be given with --cwd/-C.`,
 	Version: version.Version,
+	Args:    cobra.MaximumNArgs(1),
 	// Running without a subcommand opens the interactive agent: the last used
 	// agent when available, otherwise the built-in Eino agent.
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) > 0 {
-			return cmd.Help()
-		}
 		cfg := config.GetConfig()
 		name, err := resolveDefaultAgent(cfg)
 		if err != nil {
@@ -36,6 +39,22 @@ var RootCmd = &cobra.Command{
 		return startAgentSession(name)
 	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Enter the requested working directory first: tools resolve relative
+		// paths against it, and skills are loaded after this point. Every
+		// command accepts `[directory]` except run, which keeps its own
+		// argument surface (--prompt/--agent).
+		dir := workDir
+		if cmd.Name() != "run" {
+			d, err := workDirFromArgs(args, workDir)
+			if err != nil {
+				return err
+			}
+			dir = d
+		}
+		if err := enterWorkDir(dir); err != nil {
+			return err
+		}
+
 		// Load configuration file
 		cfg, err := config.LoadConfig(configPath)
 		if err != nil {
@@ -73,6 +92,42 @@ func Execute() {
 	}
 }
 
+// workDirFromArgs merges the --cwd flag with the optional positional
+// directory (`eino-cli [directory]`). Specifying both is an error.
+func workDirFromArgs(args []string, flagDir string) (string, error) {
+	flagDir = strings.TrimSpace(flagDir)
+	if len(args) > 1 {
+		return "", fmt.Errorf("only one working directory can be given (got %d arguments)", len(args))
+	}
+	if len(args) == 0 {
+		return flagDir, nil
+	}
+	if flagDir != "" {
+		return "", fmt.Errorf("--cwd and a positional directory cannot be used together")
+	}
+	return args[0], nil
+}
+
+// enterWorkDir switches the process to dir when it is set. An empty value keeps
+// the current directory; a leading "~" is expanded to the home directory.
+func enterWorkDir(dir string) error {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return nil
+	}
+	if dir == "~" || strings.HasPrefix(dir, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to resolve home directory: %w", err)
+		}
+		dir = filepath.Join(home, strings.TrimPrefix(dir, "~"))
+	}
+	if err := os.Chdir(dir); err != nil {
+		return fmt.Errorf("failed to change working directory to %s: %w", dir, err)
+	}
+	return nil
+}
+
 func init() {
 	// Get user home directory
 	homeDir, err := os.UserHomeDir()
@@ -83,4 +138,5 @@ func init() {
 
 	// Add global parameters
 	RootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "Configuration file path")
+	RootCmd.PersistentFlags().StringVarP(&workDir, "cwd", "C", "", "Run in this working directory (default: the current one)")
 }

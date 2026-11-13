@@ -106,6 +106,35 @@ func TestEnsureBuiltinAgentFallbackModel(t *testing.T) {
 	}
 }
 
+func TestDropAgentTools(t *testing.T) {
+	cfg := &config.Config{
+		Models: map[string]config.Model{"m": {Provider: "p", Model: "m"}},
+	}
+	name, err := ensureBuiltinAgent(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dropAgentTools(cfg, name, tools.AskUserToolName, tools.TodoToolName)
+
+	want := []string{"commandline", "filesystem", "httprequest", "browseruse", tools.SubagentToolName}
+	got := cfg.Agents[name].Tools
+	if len(got) != len(want) {
+		t.Fatalf("tools = %v, want %v", got, want)
+	}
+	for i, tool := range want {
+		if got[i] != tool {
+			t.Fatalf("tools[%d] = %q, want %q", i, got[i], tool)
+		}
+	}
+	// Tool config entries stay, other agents are untouched.
+	if _, ok := cfg.Tools[tools.AskUserToolName]; !ok {
+		t.Fatal("tool config entry was removed")
+	}
+	dropAgentTools(cfg, "missing", tools.AskUserToolName)
+	dropAgentTools(nil, name, tools.AskUserToolName)
+}
+
 func TestResolveDefaultAgent(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	_ = state.ClearLastAgent()

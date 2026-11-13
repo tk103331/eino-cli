@@ -13,7 +13,8 @@ import (
 // It initializes logging, handles signals and executes the root command.
 func Main() {
 	// The command name follows the binary name, so `eino --help` shows `eino`.
-	RootCmd.Use = filepath.Base(os.Args[0])
+	// Keep the optional positional working directory in the usage line.
+	RootCmd.Use = filepath.Base(os.Args[0]) + " [directory]"
 
 	// Initialize logging
 	if err := logger.Init(); err != nil {

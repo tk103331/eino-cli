@@ -88,6 +88,31 @@ func resolveDefaultAgent(cfg *config.Config) (string, error) {
 	return ensureBuiltinAgent(cfg)
 }
 
+// dropAgentTools removes the named tools from an agent's tool list. Tool
+// config entries are left in place, so other agents keep working.
+func dropAgentTools(cfg *config.Config, agentName string, drop ...string) {
+	if cfg == nil {
+		return
+	}
+	agent, ok := cfg.Agents[agentName]
+	if !ok || len(agent.Tools) == 0 {
+		return
+	}
+	skip := make(map[string]struct{}, len(drop))
+	for _, name := range drop {
+		skip[name] = struct{}{}
+	}
+	kept := make([]string, 0, len(agent.Tools))
+	for _, name := range agent.Tools {
+		if _, removed := skip[name]; removed {
+			continue
+		}
+		kept = append(kept, name)
+	}
+	agent.Tools = kept
+	cfg.Agents[agentName] = agent
+}
+
 // startAgentSession launches the interactive TUI for an agent and remembers
 // it as the last used agent.
 func startAgentSession(agentName string) error {
